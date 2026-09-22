@@ -133,7 +133,7 @@ impl Session {
                 expected_sha1: Some(artifact.sha1.clone()),
                 expected_size: Some(artifact.size),
                 task_id: format!("install:lib:{}", artifact.sha1),
-                label: "library".to_string(),
+                label: artifact.name.clone(),
             });
         }
         for entry in &resolved.natives {
@@ -143,10 +143,10 @@ impl Session {
                 expected_sha1: Some(entry.artifact.sha1.clone()),
                 expected_size: Some(entry.artifact.size),
                 task_id: format!("install:natives:{}", entry.artifact.sha1),
-                label: "native library".to_string(),
+                label: entry.artifact.name.clone(),
             });
         }
-        for object in asset_index.objects.values() {
+        for (name, object) in &asset_index.objects {
             specs.push(DownloadSpec {
                 url: format!(
                     "https://resources.download.minecraft.net/{}",
@@ -156,19 +156,64 @@ impl Session {
                 expected_sha1: Some(object.hash.clone()),
                 expected_size: Some(object.size),
                 task_id: format!("install:asset:{}", object.hash),
-                label: "asset".to_string(),
+                label: name.clone(),
             });
         }
 
         let total = specs.len();
+        // Every spec above sets `expected_size` from Mojang-published
+        // metadata, so the whole job's total size is known up front —
+        // aggregate progress doesn't need to wait for responses to trickle
+        // in to report an accurate `bytes_total`.
+        let overall_total: u64 = specs.iter().filter_map(|s| s.expected_size).sum();
+        let overall_label = format!("Minecraft {}", profile.id);
+
         let downloader = Downloader::new(
             self.http.inner().clone(),
             self.config.max_concurrent_downloads,
         );
         let tx = self.events_tx.clone();
-        let on_progress: bananium_net::ProgressFn = Arc::new(move |p| {
-            let _ = tx.send(Event::from(p));
-        });
+        // Per-file bytes-done, keyed by task_id, so the aggregate below can
+        // be recomputed as a simple sum on every update without any file's
+        // contribution being double-counted across retries/resumes.
+        let file_progress: Arc<std::sync::Mutex<std::collections::HashMap<String, u64>>> =
+            Arc::new(std::sync::Mutex::new(std::collections::HashMap::new()));
+        let files_completed = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let install_started = std::time::Instant::now();
+        let on_progress: bananium_net::ProgressFn = {
+            let file_progress = file_progress.clone();
+            let files_completed = files_completed.clone();
+            Arc::new(move |p: bananium_net::Progress| {
+                let just_completed = p.bytes_total.is_some_and(|t| p.bytes_done >= t);
+                let aggregate_done = {
+                    let mut progress = file_progress.lock().expect("progress mutex poisoned");
+                    let was_complete = progress
+                        .get(&p.task_id)
+                        .is_some_and(|&done| p.bytes_total.is_some_and(|t| done >= t));
+                    progress.insert(p.task_id.clone(), p.bytes_done);
+                    if just_completed && !was_complete {
+                        files_completed.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    }
+                    progress.values().sum::<u64>()
+                };
+                let elapsed = install_started.elapsed().as_secs_f64();
+                let overall_bytes_per_sec = if elapsed > 0.0 {
+                    aggregate_done as f64 / elapsed
+                } else {
+                    0.0
+                };
+                let _ = tx.send(Event::OverallProgress {
+                    task_id: "install".to_string(),
+                    label: overall_label.clone(),
+                    bytes_done: aggregate_done,
+                    bytes_total: Some(overall_total),
+                    bytes_per_sec: overall_bytes_per_sec,
+                    files_done: files_completed.load(std::sync::atomic::Ordering::Relaxed),
+                    files_total: total,
+                });
+                let _ = tx.send(Event::from(p));
+            })
+        };
         let results = downloader.download_all(specs, on_progress).await;
 
         let failures: Vec<String> = results

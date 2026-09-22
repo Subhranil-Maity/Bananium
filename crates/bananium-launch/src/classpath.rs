@@ -16,16 +16,10 @@ pub struct ResolvedArtifact {
     pub url: String,
     /// Expected size, used for the store's fast already-verified check.
     pub size: u64,
-}
-
-impl From<&DownloadArtifact> for ResolvedArtifact {
-    fn from(a: &DownloadArtifact) -> Self {
-        Self {
-            sha1: a.sha1.clone(),
-            url: a.url.clone(),
-            size: a.size,
-        }
-    }
+    /// The library's maven `group:artifact:version` coordinate — carried
+    /// along purely so a download progress label can say exactly which
+    /// library is in flight instead of just "library".
+    pub name: String,
 }
 
 /// A native-library jar that must be extracted into the natives directory
@@ -132,7 +126,7 @@ pub fn resolve_libraries(
                     .map(|e| e.exclude.clone())
                     .unwrap_or_default();
                 natives.push(NativesEntry {
-                    artifact: artifact.into(),
+                    artifact: resolved_artifact(artifact, &lib.name),
                     exclude,
                     component: native_component(lib.group_artifact()),
                 });
@@ -153,14 +147,27 @@ pub fn resolve_libraries(
     let mut classpath: Vec<ResolvedArtifact> = best
         .values()
         .map(|lib| {
-            lib.artifact()
-                .expect("dedup map only holds libraries with an artifact")
-                .into()
+            let artifact = lib
+                .artifact()
+                .expect("dedup map only holds libraries with an artifact");
+            resolved_artifact(artifact, &lib.name)
         })
         .collect();
     classpath.sort_by(|a, b| a.sha1.cmp(&b.sha1));
 
     ResolvedLibraries { classpath, natives }
+}
+
+/// Build a [`ResolvedArtifact`] from a profile's download entry plus the
+/// owning library's maven coordinate (kept separately in [`Library`], not
+/// [`DownloadArtifact`], so it can't just be a `From` impl on the latter).
+fn resolved_artifact(artifact: &DownloadArtifact, name: &str) -> ResolvedArtifact {
+    ResolvedArtifact {
+        sha1: artifact.sha1.clone(),
+        url: artifact.url.clone(),
+        size: artifact.size,
+        name: name.to_string(),
+    }
 }
 
 #[cfg(test)]

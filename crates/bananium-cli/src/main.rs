@@ -1,8 +1,12 @@
 //! clap frontend. Depends only on `bananium-api` plus its own UI library
 //! (clap) — a CI check enforces that (see PLAN.md's frontend contract).
 
-use bananium_api::{Command, CommandOutput, Config, ConfigOverrides, Paths, Session};
+use std::io::Write;
+use std::time::{Duration, Instant};
+
+use bananium_api::{Command, CommandOutput, Config, ConfigOverrides, Event, Paths, Session};
 use clap::{Parser, Subcommand};
+use tokio::sync::broadcast;
 
 #[derive(Parser)]
 #[command(name = "bananium", version, about = "The Banana Launcher")]
@@ -75,7 +79,9 @@ async fn main() -> std::process::ExitCode {
         },
     };
 
-    match session.dispatch(command).await {
+    let result = run_with_progress(&session, command, !cli.format_json).await;
+
+    match result {
         Ok(output) => {
             print_output(&output, cli.format_json);
             std::process::ExitCode::SUCCESS
@@ -84,6 +90,143 @@ async fn main() -> std::process::ExitCode {
             eprintln!("error: {err}");
             std::process::ExitCode::FAILURE
         }
+    }
+}
+
+/// Runs `command` to completion while printing its progress events to
+/// stderr as they arrive — the fix for `install` otherwise giving no
+/// feedback until it's entirely done. Subscribes to `session.events()`
+/// *before* dispatching, so no early event (e.g. the first `Progress` from
+/// a download that starts immediately) is missed — a `broadcast::Receiver`
+/// only sees events sent after it subscribes.
+///
+/// Can't just loop `events.recv()` until the channel closes: it never does
+/// while `session` (and its `events_tx`) is still alive, which is for the
+/// rest of `main`. Instead this polls the dispatch future and the event
+/// stream concurrently via `select!`, and once dispatch resolves, drains
+/// whatever's left in the broadcast buffer non-blockingly so a final 100%
+/// update isn't lost to the race between the two branches.
+async fn run_with_progress(
+    session: &Session,
+    command: Command,
+    show_progress: bool,
+) -> bananium_api::Result<CommandOutput> {
+    let mut events = session.events();
+    let mut printer = ProgressPrinter::default();
+
+    let dispatch = session.dispatch(command);
+    tokio::pin!(dispatch);
+
+    loop {
+        tokio::select! {
+            result = &mut dispatch => {
+                while let Ok(event) = events.try_recv() {
+                    if show_progress {
+                        printer.handle(event);
+                    }
+                }
+                return result;
+            }
+            event = events.recv(), if show_progress => {
+                match event {
+                    Ok(event) => printer.handle(event),
+                    Err(broadcast::error::RecvError::Lagged(_) | broadcast::error::RecvError::Closed) => {}
+                }
+            }
+        }
+    }
+}
+
+/// Stderr progress renderer for a `run_with_progress` event stream. Per-file
+/// `Progress` events are tracked only to show which file is currently in
+/// flight; the numbers that matter for a "is this stuck" read — total
+/// downloaded, total size, speed — come from the aggregate
+/// `OverallProgress` events `Session` computes for the whole job.
+#[derive(Default)]
+struct ProgressPrinter {
+    current_file: String,
+    last_rendered: Option<Instant>,
+    rendered_anything: bool,
+}
+
+impl ProgressPrinter {
+    fn handle(&mut self, event: Event) {
+        match event {
+            Event::Progress { label, .. } => {
+                self.current_file = label;
+            }
+            Event::OverallProgress {
+                bytes_done,
+                bytes_total,
+                bytes_per_sec,
+                files_done,
+                files_total,
+                ..
+            } => {
+                // Throttle rendering, not the underlying events — a
+                // multi-file install can emit hundreds of these a second,
+                // far faster than a terminal line is worth repainting.
+                // Always render the final (100%) update so the line ends
+                // on a completed, not stale, state.
+                let is_done = bytes_total.is_some_and(|t| bytes_done >= t);
+                let due = self
+                    .last_rendered
+                    .is_none_or(|t| t.elapsed() >= Duration::from_millis(150));
+                if !is_done && !due {
+                    return;
+                }
+                self.last_rendered = Some(Instant::now());
+                self.rendered_anything = true;
+
+                let pct = bytes_total
+                    .filter(|&t| t > 0)
+                    .map(|t| bytes_done as f64 / t as f64 * 100.0)
+                    .unwrap_or(0.0);
+                let total = bytes_total
+                    .map(format_bytes)
+                    .unwrap_or_else(|| "?".to_string());
+                eprint!(
+                    "\r\x1b[Kdownloading {files_done}/{files_total} files — {}/{total} ({pct:.0}%) @ {}/s — {}",
+                    format_bytes(bytes_done),
+                    format_bytes(bytes_per_sec.round() as u64),
+                    self.current_file,
+                );
+                let _ = std::io::stderr().flush();
+            }
+            Event::TaskCompleted { .. } => {
+                if self.rendered_anything {
+                    eprintln!();
+                    self.rendered_anything = false;
+                }
+            }
+            Event::TaskFailed { error, .. } => {
+                if self.rendered_anything {
+                    eprintln!();
+                    self.rendered_anything = false;
+                }
+                eprintln!("error: {error}");
+            }
+            Event::Log { level, message } => {
+                eprintln!("[{level}] {message}");
+            }
+        }
+    }
+}
+
+/// Human-readable byte count (`1536` -> `"1.5 KB"`), used both for a raw
+/// size and, with a `/s` suffix left to the caller, a transfer speed.
+fn format_bytes(bytes: u64) -> String {
+    const UNITS: [&str; 5] = ["B", "KB", "MB", "GB", "TB"];
+    let mut value = bytes as f64;
+    let mut unit = 0;
+    while value >= 1024.0 && unit < UNITS.len() - 1 {
+        value /= 1024.0;
+        unit += 1;
+    }
+    if unit == 0 {
+        format!("{bytes} {}", UNITS[unit])
+    } else {
+        format!("{value:.1} {}", UNITS[unit])
     }
 }
 

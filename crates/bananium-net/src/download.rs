@@ -45,6 +45,12 @@ pub struct Progress {
     /// Total expected size, if known (from the response's `Content-Length`
     /// or the spec's `expected_size`).
     pub bytes_total: Option<u64>,
+    /// Bytes/sec measured over *this attempt* (resets on retry, and
+    /// excludes any bytes a resume started from), so it reflects the actual
+    /// current transfer rate rather than an average skewed by a resumed
+    /// offset or an earlier slow/failed attempt. `0.0` for the instant
+    /// already-verified fast path, where nothing was actually transferred.
+    pub bytes_per_sec: f64,
 }
 
 /// Callback invoked with each [`Progress`] update. Boxed and cloneable so
@@ -172,6 +178,7 @@ async fn download_one(
             label: spec.label.clone(),
             bytes_done: spec.expected_size.unwrap_or(0),
             bytes_total: spec.expected_size,
+            bytes_per_sec: 0.0,
         });
         return Ok(());
     }
@@ -333,16 +340,26 @@ async fn try_download_once(
     // Stream chunk-by-chunk straight to disk — the response body is never
     // buffered whole in memory, which is what keeps a 400 MB modpack file
     // from blowing the RAM budget during download.
+    let attempt_started = std::time::Instant::now();
+    let mut bytes_this_attempt = 0u64;
     let mut stream = response.bytes_stream();
     while let Some(chunk) = stream.next().await {
         let chunk = chunk?;
         file.write_all(&chunk).await?;
         bytes_done += chunk.len() as u64;
+        bytes_this_attempt += chunk.len() as u64;
+        let elapsed = attempt_started.elapsed().as_secs_f64();
+        let bytes_per_sec = if elapsed > 0.0 {
+            bytes_this_attempt as f64 / elapsed
+        } else {
+            0.0
+        };
         on_progress(Progress {
             task_id: spec.task_id.clone(),
             label: spec.label.clone(),
             bytes_done,
             bytes_total: total,
+            bytes_per_sec,
         });
     }
     file.flush().await?;

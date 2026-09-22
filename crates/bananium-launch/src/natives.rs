@@ -200,6 +200,7 @@ mod tests {
                 sha1,
                 url: String::new(),
                 size: 0,
+                name: name.to_string(),
             },
             exclude: vec![],
             component: native_component(group_artifact),
