@@ -1,0 +1,22 @@
+[package]
+name = "bananium-api"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+bananium-core = { path = "../bananium-core" }
+bananium-net = { path = "../bananium-net" }
+bananium-meta = { path = "../bananium-meta" }
+bananium-store = { path = "../bananium-store" }
+bananium-instance = { path = "../bananium-instance" }
+bananium-launch = { path = "../bananium-launch" }
+bananium-java = { path = "../bananium-java" }
+serde = { version = "1", features = ["derive"] }
+thiserror = "2"
+tokio = { version = "1", features = ["sync", "rt", "process"] }
+tracing = "0.1"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+tempfile = "3"

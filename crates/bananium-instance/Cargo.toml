@@ -1,0 +1,14 @@
+[package]
+name = "bananium-instance"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+bananium-core = { path = "../bananium-core" }
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"
+thiserror = "2"
+
+[dev-dependencies]
+tempfile = "3"

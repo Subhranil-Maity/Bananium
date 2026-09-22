@@ -1,0 +1,27 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/bananium-core",
+    "crates/bananium-api",
+    "crates/bananium-net",
+    "crates/bananium-store",
+    "crates/bananium-meta",
+    "crates/bananium-java",
+    "crates/bananium-modrinth",
+    "crates/bananium-instance",
+    "crates/bananium-launch",
+    "crates/bananium-tui",
+    "crates/bananium-cli",
+    "crates/bananium-rpc",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+
+[profile.release]
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+strip = true

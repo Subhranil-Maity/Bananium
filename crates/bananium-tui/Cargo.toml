@@ -1,0 +1,11 @@
+[package]
+name = "bananium-tui"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "bananium-tui"
+path = "src/main.rs"
+
+[dependencies]
