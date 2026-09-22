@@ -1,10 +1,12 @@
 //! clap frontend. Depends only on `bananium-api` plus its own UI library
 //! (clap) — a CI check enforces that (see PLAN.md's frontend contract).
 
-use std::io::Write;
+use std::io::{IsTerminal, Write};
 use std::time::{Duration, Instant};
 
-use bananium_api::{Command, CommandOutput, Config, ConfigOverrides, Event, Paths, Session};
+use bananium_api::{
+    is_valid_instance_name, Command, CommandOutput, Config, ConfigOverrides, Event, Paths, Session,
+};
 use clap::{Parser, Subcommand};
 use tokio::sync::broadcast;
 
@@ -30,6 +32,12 @@ enum Cmd {
     Install {
         /// A Minecraft version id, e.g. "1.21.1".
         version: String,
+        /// Instance name (letters, digits, '-', '_' only). Lets several
+        /// instances share the same version. Skips the interactive prompt
+        /// when given; omit and run in a real terminal to be prompted, with
+        /// a blank answer defaulting to a random name.
+        #[arg(long)]
+        name: Option<String>,
     },
     /// Launch an installed instance.
     Launch {
@@ -41,6 +49,39 @@ enum Cmd {
         /// Print the exact command line instead of launching.
         #[arg(long)]
         dry_run: bool,
+    },
+    /// Manage installed instances.
+    Instance {
+        #[command(subcommand)]
+        action: InstanceAction,
+    },
+}
+
+#[derive(Subcommand)]
+enum InstanceAction {
+    /// List every installed instance and whether it's currently running.
+    Ls,
+    /// Change an instance's RAM cap and/or extra JVM arguments.
+    Set {
+        /// Instance slug (see `bananium instance ls`).
+        instance: String,
+        /// `-Xmx` heap cap in MB. Pass `0` to clear it back to the JVM
+        /// default.
+        #[arg(long)]
+        ram_mb: Option<u32>,
+        /// Extra JVM argument, appended after every other JVM argument at
+        /// launch time; repeat the flag for more than one. Replaces the
+        /// instance's entire current list. Omit entirely to leave the
+        /// current list untouched. `allow_hyphen_values` because almost
+        /// every real JVM flag starts with `-` (`-Xmx...`, `-XX:...`),
+        /// which clap would otherwise try to parse as one of *its* flags.
+        #[arg(long = "java-arg", allow_hyphen_values = true)]
+        java_arg: Vec<String>,
+        /// Clear the instance's extra JVM arguments back to none. Needed
+        /// because omitting `--java-arg` means "leave unchanged", not
+        /// "clear" — this is how you actually empty the list.
+        #[arg(long)]
+        clear_java_args: bool,
     },
 }
 
@@ -67,7 +108,10 @@ async fn main() -> std::process::ExitCode {
         Cmd::Config {
             action: ConfigAction::Show,
         } => Command::ConfigShow,
-        Cmd::Install { version } => Command::Install { version },
+        Cmd::Install { version, name } => {
+            let name = name.or_else(prompt_instance_name);
+            Command::Install { version, name }
+        }
         Cmd::Launch {
             instance,
             profile,
@@ -76,6 +120,25 @@ async fn main() -> std::process::ExitCode {
             instance,
             profile,
             dry_run,
+        },
+        Cmd::Instance { action } => match action {
+            InstanceAction::Ls => Command::InstanceList,
+            InstanceAction::Set {
+                instance,
+                ram_mb,
+                java_arg,
+                clear_java_args,
+            } => Command::InstanceSet {
+                instance,
+                ram_mb,
+                jvm_args: if clear_java_args {
+                    Some(Vec::new())
+                } else if java_arg.is_empty() {
+                    None
+                } else {
+                    Some(java_arg)
+                },
+            },
         },
     };
 
@@ -230,6 +293,36 @@ fn format_bytes(bytes: u64) -> String {
     }
 }
 
+/// Interactively ask for an instance name when `install` wasn't given
+/// `--name` and stdin is actually a terminal (never blocks a piped/scripted
+/// invocation — those just get `None`, which `Session` turns into a random
+/// name). Loops on an invalid answer instead of erroring, since a wasted
+/// keystroke is cheap and re-dispatching an entire failed `install` isn't.
+/// Validated with `is_valid_instance_name` — the same check
+/// `InstanceStore::create_named` re-applies server-side — so a typo is
+/// caught here, before any network call, rather than after one.
+fn prompt_instance_name() -> Option<String> {
+    if !std::io::stdin().is_terminal() {
+        return None;
+    }
+    loop {
+        eprint!("instance name (letters, digits, '-', '_'; blank = random): ");
+        let _ = std::io::stderr().flush();
+        let mut line = String::new();
+        if std::io::stdin().read_line(&mut line).is_err() {
+            return None;
+        }
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            return None;
+        }
+        if is_valid_instance_name(trimmed) {
+            return Some(trimmed.to_string());
+        }
+        eprintln!("invalid name: only letters, digits, '-', and '_' are allowed");
+    }
+}
+
 /// Resolve `BANANIUM_HOME`, load layered config from it, and build a
 /// `Session` — the CLI's one entry point into the frontend contract.
 fn build_session() -> bananium_api::Result<Session> {
@@ -284,6 +377,25 @@ fn print_output(output: &CommandOutput, as_json: bool) {
         }
         CommandOutput::Launched { instance, pid } => {
             println!("launched instance {instance:?} (pid {pid})");
+        }
+        CommandOutput::InstanceListed { instances } => {
+            if instances.is_empty() {
+                println!("no instances installed yet");
+            }
+            for i in instances {
+                let status = if i.running { "running" } else { "stopped" };
+                let ram = i
+                    .ram_mb
+                    .map(|m| format!("{m} MB"))
+                    .unwrap_or_else(|| "default".to_string());
+                println!(
+                    "{:<20} {:<12} [{status}] ram={ram} java_args={:?}",
+                    i.slug, i.mc_version, i.jvm_args
+                );
+            }
+        }
+        CommandOutput::InstanceUpdated { instance } => {
+            println!("updated instance {instance:?}");
         }
     }
 }

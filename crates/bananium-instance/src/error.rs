@@ -14,6 +14,14 @@ pub enum Error {
 
     #[error("multiple instances installed ({0:?}); specify which one to launch")]
     Ambiguous(Vec<String>),
+
+    #[error(
+        "instance name {0:?} must be non-empty and contain only letters, digits, '-', and '_'"
+    )]
+    InvalidName(String),
+
+    #[error("an instance named {0:?} already exists for a different Minecraft version")]
+    NameInUse(String),
 }
 
 pub type Result<T> = std::result::Result<T, Error>;

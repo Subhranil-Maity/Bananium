@@ -21,6 +21,8 @@ pub enum Error {
     Io(#[from] std::io::Error),
     #[error("{0} of {1} downloads failed; first error: {2}")]
     DownloadsFailed(usize, usize, String),
+    #[error("instance {0:?} is already running; only one instance of it can run at a time")]
+    InstanceAlreadyRunning(String),
 }
 
 /// Generates a `From<$source> for Error` that boxes on the way in. Written

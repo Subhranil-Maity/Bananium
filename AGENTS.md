@@ -17,17 +17,30 @@ top section for the full pitch and RAM budgets.
 
 **M0 (skeleton + contract) and M1 (vanilla launch, offline) are complete and
 verified against real Mojang endpoints and a real JVM** — not just unit
-tested. Everything from M2 onward (TUI, RPC frontend, real instance
-management, Modrinth, modpacks, Forge/NeoForge, packaging) is **not
-implemented**:
+tested. M2/M3/M4 are still mostly not implemented, but three pieces of them
+exist ahead of schedule, built on direct request rather than in milestone
+order — see the table below for exactly what each covers:
 
-- `bananium-tui` and `bananium-rpc` are one-line dummy binaries that print
-  `BOILER PLATE`. They exist so the workspace and the frontend-dependency
+- `bananium-tui` is a real (if intentionally minimal) ratatui app now, not
+  the `BOILER PLATE` stub PLAN.md's milestone order would suggest: an
+  instance list with running status, launch, and quit. The log pane, task
+  tray, and command palette PLAN.md describes for the rest of M2 don't exist
+  yet.
+- `bananium-rpc` is still a one-line dummy binary that prints
+  `BOILER PLATE`. It exists so the workspace and the frontend-dependency
   check have something to check against, nothing more.
-- `bananium-modrinth` is an empty stub crate (M4).
-- `bananium-instance` only has the minimal slice M1 needs (a version pin and
-  a game directory). `instance new|ls|clone|rm|rename|export`, groups, tags,
-  and the mod lockfile don't exist yet (M3/M4).
+- `bananium-modrinth` has a tested Modrinth v2 REST client (search, project/
+  version lookups, `version_files`, rate limiting) — built in an isolated
+  worktree/branch and not yet merged to `main`; check `git branch -a` before
+  assuming it's present in your checkout. The SQLite/FTS5 offline mirror,
+  lockfile, and dependency resolution M4 also calls for are **not** built,
+  and nothing wires this crate into `bananium-api`/any frontend yet.
+- `bananium-instance` covers more than the M1 slice now: named instances
+  (several can share one Minecraft version), a per-instance RAM cap and
+  append-only extra JVM args, and pid-based running-instance tracking
+  (`running.toml`, Linux-only liveness check, one live process per instance
+  at a time). Still missing: `clone|rm|rename|export`, groups, tags, and the
+  mod lockfile (M3/M4).
 - `bananium-java` only does system-JVM detection (`JAVA_HOME`/`PATH`/
   `/usr/lib/jvm`). Mojang java-runtime auto-provisioning and the aarch64
   Adoptium fallback are M3 work and are **not** implemented — if no system
@@ -58,13 +71,13 @@ those over this table if they ever disagree.
 | `bananium-net` | done for M1 needs | `HttpClient`, bounded-concurrency resumable `Downloader` |
 | `bananium-meta` | done for M1 needs | Mojang manifest/profile parsing, rule evaluation, asset index types, `MetaClient` (fetch-with-offline-fallback) |
 | `bananium-store` | done for M1 needs | Content-addressed blob store, reflink→hardlink→copy materialization |
-| `bananium-instance` | minimal (M1 slice only) | `InstanceConfig`/`InstanceStore` — a version pin + game dir, nothing more yet |
-| `bananium-launch` | done for M1 needs | Classpath dedup, native extraction, argument templating, offline UUIDs, `LaunchPlan` |
+| `bananium-instance` | ahead of M1, short of M3 | `InstanceConfig`/`InstanceStore` — named instances, RAM/JVM-arg overrides, running-pid tracking; no clone/rm/rename/export/groups/lockfile yet |
+| `bananium-launch` | done for M1 needs, plus RAM/extra-JVM-arg support | Classpath dedup, native extraction, argument templating, offline UUIDs, `LaunchPlan` |
 | `bananium-java` | detection only | System JVM search. No Mojang runtime provisioning yet. |
-| `bananium-cli` | `config show`/`install`/`launch` only | clap frontend |
-| `bananium-tui` | **dummy stub** | prints `BOILER PLATE`, nothing else |
+| `bananium-cli` | `config show`/`install`/`launch`/`instance ls`/`instance set` | clap frontend |
+| `bananium-tui` | **first slice** | ratatui instance list + launch + quit; no log pane/task tray/command palette yet |
 | `bananium-rpc` | **dummy stub** | prints `BOILER PLATE`, nothing else |
-| `bananium-modrinth` | **empty stub** | not started (M4) |
+| `bananium-modrinth` | **tested API client, unmerged** | v2 REST client on a separate branch/worktree; no offline mirror, no frontend wiring |
 
 ## The frontend contract — do not violate this
 
@@ -207,7 +220,13 @@ for real and are worth knowing up front.
   retries with exponential backoff, verifies the checksum *after* a
   download completes and only then atomically renames into place. A
   checksum mismatch deletes the `.part` file rather than retrying a resume
-  from possibly-corrupt data.
+  from possibly-corrupt data. Every `Progress` update carries a per-attempt
+  `bytes_per_sec`; `Session::install` (in `bananium-api`) sums the whole
+  job's per-file progress into a separate `Event::OverallProgress` (total
+  bytes done/total, average speed, files done/total) since `bananium-net`
+  only ever sees one file at a time and can't produce that itself.
+  `bananium-cli` renders that aggregate as a throttled stderr ticker — see
+  its `ProgressPrinter`.
 
 - **`bananium-api::Error`** boxes every sub-crate error variant
   (`Box<bananium_core::Error>` etc.) to satisfy clippy's

@@ -155,6 +155,15 @@ impl Paths {
         self.instance_dir(slug).join("bananium.lock.toml")
     }
 
+    /// `running.toml`: pids Bananium has spawned for this instance,
+    /// deliberately separate from `instance.toml` — it's ephemeral runtime
+    /// state, not declarative config, and gets pruned/rewritten on every
+    /// liveness check rather than only on user edits. See
+    /// `bananium_instance::InstanceStore::running_pids`.
+    pub fn instance_running_toml(&self, slug: &str) -> PathBuf {
+        self.instance_dir(slug).join("running.toml")
+    }
+
     /// The actual game directory passed to the JVM as `--gameDir` /
     /// `${game_directory}` (holds `mods/`, `saves/`, `config/`, ...).
     pub fn instance_minecraft_dir(&self, slug: &str) -> PathBuf {

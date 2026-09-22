@@ -31,6 +31,14 @@ pub struct LaunchContext {
     pub launcher_name: String,
     /// Substituted into `${launcher_version}`/`-Dminecraft.launcher.version`.
     pub launcher_version: String,
+    /// `-Xmx<ram_mb>M` heap cap; `None` leaves the JVM's own default in
+    /// place. From `InstanceConfig::ram_mb`.
+    pub ram_mb: Option<u32>,
+    /// The instance's own extra JVM arguments (`InstanceConfig::jvm_args`),
+    /// appended after every other JVM argument this module generates —
+    /// see [`build_launch_plan`]'s doc comment for why append-only is the
+    /// only placement that keeps these interpreted as JVM flags at all.
+    pub extra_jvm_args: Vec<String>,
 }
 
 /// A fully-resolved, ready-to-run launch: the exact JVM binary, arguments,
@@ -91,6 +99,15 @@ fn shell_quote(s: &str) -> String {
 /// (1.13+) `arguments.game`/`arguments.jvm` rule arrays and the legacy
 /// `minecraftArguments` string — substituting every `${...}` placeholder
 /// Mojang profiles reference.
+///
+/// `ctx.ram_mb` (as `-Xmx<n>M`) and then `ctx.extra_jvm_args` verbatim are
+/// appended *last*, after every JVM argument generated above. That ordering
+/// is deliberate, not incidental: everything on `jvm_args` up to that point
+/// must come before the main class or the JVM parses it as a game argument
+/// instead — appending is the only placement where a user's custom flag
+/// still reaches the JVM at all, and appending last (rather than first)
+/// means a custom flag can override an auto-generated one (e.g. a
+/// different GC) since the JVM honors the last repeated flag.
 pub fn build_launch_plan(
     profile: &VersionProfile,
     platform: &Platform,
@@ -128,6 +145,11 @@ pub fn build_launch_plan(
             game_args.extend(substituted.split_whitespace().map(str::to_string));
         }
     }
+
+    if let Some(ram_mb) = ctx.ram_mb {
+        jvm_args.push(format!("-Xmx{ram_mb}M"));
+    }
+    jvm_args.extend(ctx.extra_jvm_args.iter().cloned());
 
     LaunchPlan {
         java_bin,
@@ -236,6 +258,8 @@ mod tests {
             ],
             launcher_name: "bananium".into(),
             launcher_version: "0.1.0".into(),
+            ram_mb: None,
+            extra_jvm_args: Vec::new(),
         }
     }
 
@@ -245,6 +269,46 @@ mod tests {
             arch: "x86_64".into(),
             os_version: String::new(),
         }
+    }
+
+    #[test]
+    fn ram_and_extra_jvm_args_are_appended_after_every_generated_jvm_arg() {
+        let profile: VersionProfile = serde_json::from_str(
+            r#"{
+                "id": "1.21.1",
+                "type": "release",
+                "mainClass": "net.minecraft.client.main.Main",
+                "assetIndex": {"id":"17","sha1":"a","size":1,"url":"http://x/17.json"},
+                "assets": "17",
+                "downloads": {"client": {"sha1":"b","size":1,"url":"http://x/client.jar"}},
+                "libraries": [],
+                "arguments": {
+                    "game": ["--username", "${auth_player_name}"],
+                    "jvm": ["-Djava.library.path=${natives_directory}"]
+                }
+            }"#,
+        )
+        .unwrap();
+
+        let mut context = ctx();
+        context.ram_mb = Some(3072);
+        context.extra_jvm_args = vec!["-XX:+UseG1GC".to_string()];
+
+        let plan = build_launch_plan(
+            &profile,
+            &platform(),
+            &FeatureFlags::default(),
+            &context,
+            PathBuf::from("java"),
+        );
+        assert_eq!(
+            plan.jvm_args,
+            vec![
+                "-Djava.library.path=/home/test/.bananium/cache/natives/abc123".to_string(),
+                "-Xmx3072M".to_string(),
+                "-XX:+UseG1GC".to_string(),
+            ]
+        );
     }
 
     #[test]

@@ -13,7 +13,7 @@ use tokio::sync::broadcast;
 use crate::command::Command;
 use crate::error::{Error, Result};
 use crate::event::Event;
-use crate::output::{CommandOutput, ResolvedPaths};
+use crate::output::{CommandOutput, InstanceSummary, ResolvedPaths};
 
 /// Sent on every outgoing request. Mojang doesn't require this, but
 /// Modrinth's API (M4) rate-limits generic/missing agents — setting a
@@ -71,7 +71,7 @@ impl Session {
     pub async fn dispatch(&self, command: Command) -> Result<CommandOutput> {
         match command {
             Command::ConfigShow => self.config_show(),
-            Command::Install { version } => self.install(&version).await,
+            Command::Install { version, name } => self.install(&version, name.as_deref()).await,
             Command::Launch {
                 instance,
                 profile,
@@ -80,6 +80,12 @@ impl Session {
                 self.launch(instance.as_deref(), profile.as_deref(), dry_run)
                     .await
             }
+            Command::InstanceList => self.instance_list(),
+            Command::InstanceSet {
+                instance,
+                ram_mb,
+                jvm_args,
+            } => self.instance_set(&instance, ram_mb, jvm_args),
         }
     }
 
@@ -100,14 +106,15 @@ impl Session {
     /// `Command::Install`: resolve the version, download the client jar +
     /// every applicable library/natives jar + every asset object (skipping
     /// anything already verified in the store), materialize the assets
-    /// tree into the Mojang-shaped layout the JVM expects, and ensure a
-    /// minimal vanilla instance exists for this version.
+    /// tree into the Mojang-shaped layout the JVM expects, and create an
+    /// instance for it named `name` (a fresh random name when `None`) if
+    /// one doesn't already exist under that name.
     ///
     /// Downloads use [`resolve_libraries`] — the *same* library-resolution
     /// logic `launch` uses to build the classpath — so what gets fetched
     /// here is exactly what a later launch will need; nothing is fetched
     /// speculatively and nothing needed is skipped.
-    async fn install(&self, version: &str) -> Result<CommandOutput> {
+    async fn install(&self, version: &str, name: Option<&str>) -> Result<CommandOutput> {
         let meta = MetaClient::new(self.http.clone(), self.paths.clone());
         let entry = meta.resolve_version(version).await?;
         let profile = meta.version_profile(&entry).await?;
@@ -251,7 +258,7 @@ impl Session {
         }
 
         let instances = InstanceStore::new(self.paths.clone());
-        let slug = instances.ensure_vanilla(&profile.id)?;
+        let slug = instances.create_named(&profile.id, name)?;
 
         Ok(CommandOutput::Installed {
             instance: slug,
@@ -275,6 +282,14 @@ impl Session {
         let instances = InstanceStore::new(self.paths.clone());
         let slug = instances.resolve(instance)?;
         let instance_cfg = instances.load(&slug)?;
+
+        // Checked before doing any of the (potentially slow, network-
+        // touching) work below, and skipped for `dry_run` since that never
+        // actually spawns anything. Only a real launch needs to actually
+        // record a pid, so only a real launch needs to check for one first.
+        if !dry_run && instances.is_running(&slug)? {
+            return Err(Error::InstanceAlreadyRunning(slug));
+        }
 
         let meta = MetaClient::new(self.http.clone(), self.paths.clone());
         let entry = meta.resolve_version(&instance_cfg.mc_version).await?;
@@ -317,6 +332,8 @@ impl Session {
             classpath,
             launcher_name: "bananium".to_string(),
             launcher_version: env!("CARGO_PKG_VERSION").to_string(),
+            ram_mb: instance_cfg.ram_mb,
+            extra_jvm_args: instance_cfg.jvm_args.clone(),
         };
 
         let plan = build_launch_plan(&profile, &platform, &features, &ctx, java.path);
@@ -332,8 +349,12 @@ impl Session {
         let mut cmd = tokio::process::Command::from(plan.to_command());
         let mut child = cmd.spawn()?;
         let pid = child.id().unwrap_or(0);
+        instances.mark_running(&slug, pid)?;
         // M1 launches attached-but-not-awaited: the caller gets the pid back
-        // immediately. `--detach`/log-supervision is M3 scope.
+        // immediately. `--detach`/log-supervision is M3 scope. Nothing here
+        // removes the pid from `running.toml` on exit — see
+        // `InstanceStore::running_pids`'s doc comment on why that's a
+        // lazy, re-checked-on-read design rather than an active one.
         tokio::spawn(async move {
             let _ = child.wait().await;
         });
@@ -341,6 +362,50 @@ impl Session {
         Ok(CommandOutput::Launched {
             instance: slug,
             pid,
+        })
+    }
+
+    /// `Command::InstanceList`: every installed instance plus its current
+    /// running status, for a frontend's instance list (the TUI's, for one).
+    fn instance_list(&self) -> Result<CommandOutput> {
+        let instances = InstanceStore::new(self.paths.clone());
+        let mut summaries = Vec::new();
+        for (slug, cfg) in instances.list_configs()? {
+            let running = instances.is_running(&slug)?;
+            summaries.push(InstanceSummary {
+                slug,
+                name: cfg.name,
+                mc_version: cfg.mc_version,
+                ram_mb: cfg.ram_mb,
+                jvm_args: cfg.jvm_args,
+                running,
+            });
+        }
+        Ok(CommandOutput::InstanceListed {
+            instances: summaries,
+        })
+    }
+
+    /// `Command::InstanceSet`: see the field-level doc comments on
+    /// `Command::InstanceSet` for the "`None`/absent means unchanged"
+    /// convention this follows.
+    fn instance_set(
+        &self,
+        instance: &str,
+        ram_mb: Option<u32>,
+        jvm_args: Option<Vec<String>>,
+    ) -> Result<CommandOutput> {
+        let instances = InstanceStore::new(self.paths.clone());
+        let mut cfg = instances.load(instance)?;
+        if let Some(ram_mb) = ram_mb {
+            cfg.ram_mb = if ram_mb == 0 { None } else { Some(ram_mb) };
+        }
+        if let Some(jvm_args) = jvm_args {
+            cfg.jvm_args = jvm_args;
+        }
+        instances.save(instance, &cfg)?;
+        Ok(CommandOutput::InstanceUpdated {
+            instance: instance.to_string(),
         })
     }
 }
