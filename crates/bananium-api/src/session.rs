@@ -346,7 +346,27 @@ impl Session {
         }
 
         std::fs::create_dir_all(&ctx.game_directory)?;
+
+        // The JVM's stdout/stderr must never inherit the frontend's own —
+        // for the TUI that's raw-mode/alternate-screen terminal state, and
+        // Minecraft's log spam would otherwise get interleaved with (and
+        // corrupt) the redrawn UI on every frame. Redirect both to a
+        // per-launch file under `instance_logs_dir` instead; stdin is
+        // closed outright since nothing here ever feeds this process input.
+        let logs_dir = self.paths.instance_logs_dir(&slug);
+        std::fs::create_dir_all(&logs_dir)?;
+        let timestamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or_default();
+        let log_path = logs_dir.join(format!("launch-{timestamp}.log"));
+        let stdout_log = std::fs::File::create(&log_path)?;
+        let stderr_log = stdout_log.try_clone()?;
+
         let mut cmd = tokio::process::Command::from(plan.to_command());
+        cmd.stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::from(stdout_log))
+            .stderr(std::process::Stdio::from(stderr_log));
         let mut child = cmd.spawn()?;
         let pid = child.id().unwrap_or(0);
         instances.mark_running(&slug, pid)?;
@@ -362,6 +382,7 @@ impl Session {
         Ok(CommandOutput::Launched {
             instance: slug,
             pid,
+            log_path,
         })
     }
 

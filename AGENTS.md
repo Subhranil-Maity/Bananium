@@ -17,15 +17,39 @@ top section for the full pitch and RAM budgets.
 
 **M0 (skeleton + contract) and M1 (vanilla launch, offline) are complete and
 verified against real Mojang endpoints and a real JVM** — not just unit
-tested. M2/M3/M4 are still mostly not implemented, but three pieces of them
-exist ahead of schedule, built on direct request rather than in milestone
-order — see the table below for exactly what each covers:
+tested. M2/M3/M4 are still mostly not implemented, but several pieces of
+them exist ahead of schedule, built on direct request rather than in
+milestone order — see the table below for exactly what each covers:
 
 - `bananium-tui` is a real (if intentionally minimal) ratatui app now, not
   the `BOILER PLATE` stub PLAN.md's milestone order would suggest: an
-  instance list with running status, launch, and quit. The log pane, task
-  tray, and command palette PLAN.md describes for the rest of M2 don't exist
-  yet.
+  instance list with running status, launch, quit, refresh, and an edit
+  overlay (`e`) over `Command::InstanceSet` for a selected instance's RAM
+  cap and extra JVM args. A launched instance's JVM stdout/stderr are
+  redirected to a per-launch file under `instance_logs_dir` (never inherited
+  from the frontend) so the raw-mode/alternate-screen UI can't be corrupted
+  by game log spam — see `Session::launch`'s doc comment in
+  `bananium-api/src/session.rs`. The *live* log pane (tailing that file in
+  its own pane while the game runs), task tray, and command palette PLAN.md
+  describes for the rest of M2 don't exist yet.
+- `bananium-egui` is a full second graphical frontend, not part of any
+  PLAN.md milestone (PLAN.md only gestures at "a future GUI" as an
+  architecture-supports-it example, line ~21) — built on direct request.
+  Three tabs over the same `Command`/`Event` surface the TUI uses:
+  Instances (list with running status, launch, dry-run preview, RAM/JVM-arg
+  editing via `Command::InstanceSet`, and a live log tail of the file
+  `Session::launch` redirects a launched JVM's stdout/stderr into), Install
+  (with a real progress bar wired to `Event::OverallProgress`), and Config
+  (read-only `Command::ConfigShow` view). Reached via `bananium --gui` —
+  `bananium-cli`'s `main` never starts a Tokio runtime on the branch that
+  takes this path, since `eframe`/`winit`'s native event loop needs to own
+  the thread `#[tokio::main]` would otherwise claim; see
+  `crates/bananium-egui/src/worker.rs` for how the crate's own background
+  Tokio runtime bridges `Session`'s `async` API to `eframe`'s synchronous
+  `App::ui`. `bananium-cli` depending on `bananium-egui` is a deliberate,
+  narrow, documented exception to the frontend contract below — see
+  `scripts/check_frontend_deps.py`'s `EXTRA_ALLOWED_DEPS` and its comment
+  for why it doesn't actually violate the contract's substance.
 - `bananium-rpc` is still a one-line dummy binary that prints
   `BOILER PLATE`. It exists so the workspace and the frontend-dependency
   check have something to check against, nothing more.
@@ -53,6 +77,15 @@ order — see the table below for exactly what each covers:
   crate for home resolution — but nothing has actually run there).
 - No git history predates this file; the repo was freshly initialized
   alongside it.
+- `bananium-egui` compiles clean and has been run for real against this
+  machine's live Wayland session (a real Vulkan adapter, real installed
+  instances) — but only here. `.github/workflows/ci.yml`'s `ubuntu-latest`/
+  `windows-latest` matrix hasn't actually run since this crate was added; if
+  it fails to compile there, the likely cause is missing X11/Wayland/GL dev
+  packages on the runner (`eframe`'s windowing deps load most of these via
+  `dlopen` at runtime rather than linking at build time, which is why this
+  machine needed no extra packages — a CI runner's baseline image may still
+  differ).
 
 Don't assume a `Command` variant, CLI subcommand, or crate capability exists
 just because PLAN.md describes it for a later milestone — check the actual
@@ -74,18 +107,26 @@ those over this table if they ever disagree.
 | `bananium-instance` | ahead of M1, short of M3 | `InstanceConfig`/`InstanceStore` — named instances, RAM/JVM-arg overrides, running-pid tracking; no clone/rm/rename/export/groups/lockfile yet |
 | `bananium-launch` | done for M1 needs, plus RAM/extra-JVM-arg support | Classpath dedup, native extraction, argument templating, offline UUIDs, `LaunchPlan` |
 | `bananium-java` | detection only | System JVM search. No Mojang runtime provisioning yet. |
-| `bananium-cli` | `config show`/`install`/`launch`/`instance ls`/`instance set` | clap frontend |
-| `bananium-tui` | **first slice** | ratatui instance list + launch + quit; no log pane/task tray/command palette yet |
+| `bananium-cli` | `config show`/`install`/`launch`/`instance ls`/`instance set`/`--gui` | clap frontend; `--gui` hands off to `bananium-egui` |
+| `bananium-tui` | **first slice** | ratatui instance list + launch (stdio redirected to a log file) + RAM/JVM-args edit overlay + quit; no live log pane/task tray/command palette yet |
+| `bananium-egui` | **full-featured, not a "first slice"** | eframe/egui GUI: Instances (list, launch, dry-run, RAM/JVM-args edit, live log tail), Install (real progress bar), Config (read-only view). Reached via `bananium --gui`; not in any PLAN.md milestone |
 | `bananium-rpc` | **dummy stub** | prints `BOILER PLATE`, nothing else |
 | `bananium-modrinth` | **tested API client, unmerged** | v2 REST client on a separate branch/worktree; no offline mirror, no frontend wiring |
 
 ## The frontend contract — do not violate this
 
-`bananium-cli`, `bananium-tui`, and `bananium-rpc` may depend on
-`bananium-api` and their own UI libraries (clap, ratatui, ...) — **nothing
-else in the workspace**. All filesystem/network access, all business logic,
-lives behind `Session::dispatch(Command) -> Result<CommandOutput>` and
-`Session::events() -> Stream<Event>` in `bananium-api`.
+`bananium-cli`, `bananium-tui`, `bananium-egui`, and `bananium-rpc` may
+depend on `bananium-api` and their own UI libraries (clap, ratatui, egui/
+eframe, ...) — **nothing else in the workspace**, with one narrow,
+documented exception: `bananium-cli` may also depend on `bananium-egui`, to
+embed it behind `--gui` in one binary rather than shipping a second
+executable. That exception doesn't weaken the contract's substance —
+`bananium-egui` is itself still constrained to depend on nothing but
+`bananium-api`, so no business logic reaches `bananium-cli` through it that
+doesn't already flow through `bananium-api`. All filesystem/network access,
+all business logic, lives behind `Session::dispatch(Command) ->
+Result<CommandOutput>` and `Session::events() -> Stream<Event>` in
+`bananium-api`.
 
 This is mechanically enforced: `scripts/check_frontend_deps.py` parses each
 frontend crate's `Cargo.toml` and fails if it names any other `bananium-*`

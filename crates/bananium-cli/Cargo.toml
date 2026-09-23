@@ -10,6 +10,11 @@ path = "src/main.rs"
 
 [dependencies]
 bananium-api = { path = "../bananium-api" }
+# `--gui` embeds the egui frontend directly in this binary rather than
+# shelling out to a sibling executable — see scripts/check_frontend_deps.py
+# for why this doesn't violate the frontend contract despite being a
+# bananium-* dependency other than bananium-api.
+bananium-egui = { path = "../bananium-egui" }
 clap = { version = "4", features = ["derive"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync"] }
 serde_json = "1"

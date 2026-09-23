@@ -11,6 +11,7 @@ members = [
     "crates/bananium-instance",
     "crates/bananium-launch",
     "crates/bananium-tui",
+    "crates/bananium-egui",
     "crates/bananium-cli",
     "crates/bananium-rpc",
 ]

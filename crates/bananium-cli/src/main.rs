@@ -17,8 +17,14 @@ struct Cli {
     #[arg(long, global = true)]
     format_json: bool,
 
+    /// Launch the graphical (egui) interface instead of running a
+    /// subcommand. Takes over the whole process — no subcommand may be
+    /// given alongside it.
+    #[arg(long, global = true)]
+    gui: bool,
+
     #[command(subcommand)]
-    command: Cmd,
+    command: Option<Cmd>,
 }
 
 #[derive(Subcommand)]
@@ -91,11 +97,60 @@ enum ConfigAction {
     Show,
 }
 
-#[tokio::main]
-async fn main() -> std::process::ExitCode {
+/// Plain (non-`#[tokio::main]`) entry point: `--gui` must own the main
+/// thread for `eframe`/`winit`'s native event loop, which can't run inside
+/// an already-started Tokio runtime the way the rest of this binary's
+/// subcommands need one. So the runtime is only ever built on the branch
+/// that actually needs it — `run_cli` — never up front in `main` itself.
+fn main() -> std::process::ExitCode {
     bananium_api::init_logging();
     let cli = Cli::parse();
 
+    if cli.gui {
+        if cli.command.is_some() {
+            eprintln!("error: --gui cannot be combined with a subcommand");
+            return std::process::ExitCode::FAILURE;
+        }
+        return run_gui();
+    }
+
+    let Some(command) = cli.command else {
+        use clap::CommandFactory;
+        let _ = Cli::command().print_help();
+        println!();
+        return std::process::ExitCode::FAILURE;
+    };
+
+    let runtime = match tokio::runtime::Runtime::new() {
+        Ok(rt) => rt,
+        Err(err) => {
+            eprintln!("error: failed to start async runtime: {err}");
+            return std::process::ExitCode::FAILURE;
+        }
+    };
+    runtime.block_on(run_cli(command, cli.format_json))
+}
+
+/// `--gui`: hand the already-built `Session` straight to `bananium-egui`,
+/// blocking this thread (the window's event loop) until the window closes.
+fn run_gui() -> std::process::ExitCode {
+    let session = match build_session() {
+        Ok(s) => s,
+        Err(err) => {
+            eprintln!("error: {err}");
+            return std::process::ExitCode::FAILURE;
+        }
+    };
+    match bananium_egui::run(session) {
+        Ok(()) => std::process::ExitCode::SUCCESS,
+        Err(err) => {
+            eprintln!("error: {err}");
+            std::process::ExitCode::FAILURE
+        }
+    }
+}
+
+async fn run_cli(command: Cmd, format_json: bool) -> std::process::ExitCode {
     let session = match build_session() {
         Ok(s) => s,
         Err(err) => {
@@ -104,7 +159,7 @@ async fn main() -> std::process::ExitCode {
         }
     };
 
-    let command = match cli.command {
+    let command = match command {
         Cmd::Config {
             action: ConfigAction::Show,
         } => Command::ConfigShow,
@@ -142,11 +197,11 @@ async fn main() -> std::process::ExitCode {
         },
     };
 
-    let result = run_with_progress(&session, command, !cli.format_json).await;
+    let result = run_with_progress(&session, command, !format_json).await;
 
     match result {
         Ok(output) => {
-            print_output(&output, cli.format_json);
+            print_output(&output, format_json);
             std::process::ExitCode::SUCCESS
         }
         Err(err) => {
@@ -375,8 +430,13 @@ fn print_output(output: &CommandOutput, as_json: bool) {
             println!("# instance {instance:?}, dry run — nothing was executed");
             println!("{command_line}");
         }
-        CommandOutput::Launched { instance, pid } => {
+        CommandOutput::Launched {
+            instance,
+            pid,
+            log_path,
+        } => {
             println!("launched instance {instance:?} (pid {pid})");
+            println!("output logged to {}", log_path.display());
         }
         CommandOutput::InstanceListed { instances } => {
             if instances.is_empty() {

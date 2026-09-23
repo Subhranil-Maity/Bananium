@@ -49,6 +49,11 @@ pub enum CommandOutput {
     Launched {
         instance: String,
         pid: u32,
+        /// Where this run's JVM stdout/stderr were redirected — the process
+        /// is spawned detached from the frontend's own stdio (see
+        /// `Session::launch`'s doc comment), so this is how a caller finds
+        /// the output after the fact.
+        log_path: PathBuf,
     },
     InstanceListed {
         instances: Vec<InstanceSummary>,
