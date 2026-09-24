@@ -6,11 +6,26 @@
 //!
 //! Depends only on `bananium-api` plus its own UI libraries (`egui`,
 //! `eframe`) — a CI check enforces that (see PLAN.md's frontend contract).
-//! `eframe`'s renderer (`wgpu`, falling back to `glow`) links straight
-//! against whatever GPU driver is already on the system, the same way any
-//! native Rust binary does — there's no bundled webview process or Node/
-//! Electron runtime to ship alongside it, which is the whole point of
-//! reaching for egui here instead of a web-view-based UI toolkit.
+//! `eframe`'s renderer links straight against whatever GPU driver is already
+//! on the system, the same way any native Rust binary does — there's no
+//! bundled webview process or Node/Electron runtime to ship alongside it,
+//! which is the whole point of reaching for egui here instead of a
+//! web-view-based UI toolkit.
+//!
+//! `eframe`'s *default* renderer is `wgpu`, which on Windows means it opens
+//! a DirectX 12 (or Vulkan) device — descriptor heaps and committed
+//! GPU-visible allocations that cost a real, measured ~230 MB of private
+//! memory (RSS ~330 MB) just to paint egui's immediate-mode 2D UI, nothing
+//! this app's actual rendering needs justifies. [`run`] instead requests
+//! `NativeOptions::renderer = Renderer::Glow` (`Cargo.toml` enables the
+//! `glow` feature alongside the crate's own default features so the variant
+//! exists to request), which uses a plain OpenGL context instead —
+//! confirmed on this project's real Windows dev box to fall to ~49 MB
+//! private / ~104 MB RSS for the exact same window, a >5x reduction with no
+//! visible behavior change, since none of egui's rendering needs anything
+//! wgpu offers over glow (no 3D, no compute shaders, no WebGPU portability
+//! requirement). Revisit only if a real feature actually needs `wgpu`'s
+//! capabilities, and re-measure before assuming it's still worth the RAM.
 //!
 //! `Session::dispatch` is `async`, but `eframe::App::ui` is a plain
 //! synchronous callback driven by `winit`'s event loop, which must own the
@@ -48,6 +63,7 @@ pub fn run(session: Session) -> Result<()> {
             .with_inner_size([1000.0, 640.0])
             .with_min_inner_size([720.0, 480.0])
             .with_title("Bananium"),
+        renderer: eframe::Renderer::Glow,
         ..Default::default()
     };
 
