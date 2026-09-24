@@ -12,7 +12,7 @@ pub enum Error {
     TomlParse {
         path: PathBuf,
         #[source]
-        source: toml::de::Error,
+        source: Box<toml::de::Error>,
     },
 
     #[error("failed to serialize TOML: {0}")]

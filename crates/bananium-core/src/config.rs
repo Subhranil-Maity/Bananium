@@ -58,7 +58,7 @@ impl Config {
             let text = std::fs::read_to_string(&toml_path)?;
             let file: ConfigFile = toml::from_str(&text).map_err(|source| Error::TomlParse {
                 path: toml_path.clone(),
-                source,
+                source: Box::new(source),
             })?;
             if let Some(v) = file.max_concurrent_downloads {
                 cfg.max_concurrent_downloads = v;

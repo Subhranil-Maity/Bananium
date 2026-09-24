@@ -342,7 +342,11 @@ mod tests {
             plan.jvm_args[0],
             "-Djava.library.path=/home/test/.bananium/cache/natives/abc123"
         );
-        assert_eq!(plan.jvm_args[2], "/store/aa/aaaa:/store/bb/bbbb");
+        let sep = if cfg!(windows) { ";" } else { ":" };
+        assert_eq!(
+            plan.jvm_args[2],
+            format!("/store/aa/aaaa{sep}/store/bb/bbbb")
+        );
         assert_eq!(plan.main_class, "net.minecraft.client.main.Main");
     }
 

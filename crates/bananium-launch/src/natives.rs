@@ -1,6 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use bananium_core::Paths;
+use bananium_meta::Platform;
 use sha1::{Digest, Sha1};
 
 use crate::classpath::{NativesEntry, NATIVE_COMPONENTS};
@@ -12,7 +13,7 @@ use crate::error::Result;
 /// nothing for anyone who already has a `.bananium-extracted` marker on
 /// disk from the broken version: the key wouldn't change, so
 /// `extract_natives` would keep trusting the stale, wrong output forever.
-const EXTRACTION_LAYOUT_VERSION: u32 = 4;
+const EXTRACTION_LAYOUT_VERSION: u32 = 5;
 
 /// A stable cache key for a set of native jars: the SHA-1 of their sorted
 /// SHA-1s (plus `EXTRACTION_LAYOUT_VERSION`), joined. Deterministic
@@ -50,7 +51,11 @@ const DEFAULT_EXCLUDES: &[&str] = &["META-INF/"];
 /// routes there — e.g. JNA self-extracts its own bundled natives into
 /// `jna.tmpdir` at runtime, so Bananium never writes into `<root>/jna/`,
 /// but the directory still needs to exist.
-pub fn extract_natives(paths: &Paths, natives: &[NativesEntry]) -> Result<PathBuf> {
+pub fn extract_natives(
+    paths: &Paths,
+    natives: &[NativesEntry],
+    platform: &Platform,
+) -> Result<PathBuf> {
     let key = natives_cache_key(natives);
     let dir = paths.natives_cache_dir(&key);
     let marker = dir.join(".bananium-extracted");
@@ -64,10 +69,57 @@ pub fn extract_natives(paths: &Paths, natives: &[NativesEntry]) -> Result<PathBu
     }
     for entry in natives {
         let jar_path = paths.store_blob(&entry.artifact.sha1);
-        extract_jar(&jar_path, &dir, entry.component, &entry.exclude)?;
+        extract_jar(&jar_path, &dir, entry.component, &entry.exclude, platform)?;
     }
     std::fs::write(&marker, b"")?;
     Ok(dir)
+}
+
+/// Recognized `<os>/<arch>/...` first-two-segment prefixes a native jar's
+/// internal layout uses to multiplex several platforms into one archive
+/// (e.g. modern LWJGL's `natives-windows` jar ships `windows/x86/...`,
+/// `windows/x64/...`, *and* `windows/arm64/...` side by side in the same
+/// file, meant for the loader to pick one at runtime by inspecting
+/// `os.arch`). Returns `None` when the entry's path doesn't start with a
+/// recognized `(os, arch)` pair, meaning it isn't platform-namespaced at all
+/// (older, single-platform native jars) and should always be extracted.
+fn jar_platform_prefix(name: &str) -> Option<(&str, &str)> {
+    let mut segments = name.split('/');
+    let os = segments.next()?;
+    let arch = segments.next()?;
+    const KNOWN_OS: &[&str] = &["windows", "linux", "macos", "osx"];
+    const KNOWN_ARCH: &[&str] = &[
+        "x64",
+        "x86",
+        "arm64",
+        "arm32",
+        "riscv64",
+        "loongarch64",
+        "ppc64le",
+    ];
+    if KNOWN_OS.contains(&os) && KNOWN_ARCH.contains(&arch) {
+        Some((os, arch))
+    } else {
+        None
+    }
+}
+
+/// Whether a jar entry under a recognized `(os, arch)` prefix (see
+/// [`jar_platform_prefix`]) belongs to the given [`Platform`]. Mojang's
+/// `os_name`/`arch` spellings (`"osx"`, `"x86_64"`) don't match a native
+/// jar's own internal directory names (`"macos"`, `"x64"`) one-for-one, so
+/// this maps between the two vocabularies rather than comparing them
+/// directly.
+fn matches_platform(entry_os: &str, entry_arch: &str, platform: &Platform) -> bool {
+    let os_matches = match platform.os_name.as_str() {
+        "osx" => entry_os == "macos" || entry_os == "osx",
+        other => entry_os == other,
+    };
+    let arch_matches = match platform.arch.as_str() {
+        "x86_64" => entry_arch == "x64",
+        other => entry_arch == other,
+    };
+    os_matches && arch_matches
 }
 
 /// Unzip every entry of one native-library jar, **flattened to its
@@ -108,7 +160,28 @@ pub fn extract_natives(paths: &Paths, natives: &[NativesEntry]) -> Result<PathBu
 /// `META-INF/` continues to exclude nested manifest files), only the
 /// destination path is flattened. Directory entries are skipped outright
 /// (there's nothing to flatten them to).
-fn extract_jar(jar_path: &Path, root: &Path, component: &str, exclude: &[String]) -> Result<()> {
+///
+/// Entries under a recognized `<os>/<arch>/...` prefix (see
+/// [`jar_platform_prefix`]) for a platform other than the one actually
+/// running are skipped entirely — **not** extracted-then-overwritten. This
+/// is a real, previously-shipped bug fix: a single modern native jar can
+/// bundle every architecture Mojang supports for that OS (e.g.
+/// `natives-windows` containing `windows/x86`, `windows/x64`, *and*
+/// `windows/arm64` side by side), and blindly flattening every entry to its
+/// basename made whichever architecture's file the zip iterator happened to
+/// visit last silently clobber the correct one — observed for real as a
+/// 64-bit JVM ending up with a 32-bit `lwjgl.dll` and crashing with
+/// `UnsatisfiedLinkError: Failed to locate library: lwjgl.dll`. Filtering by
+/// platform *before* flattening means only the current platform's files
+/// ever reach the collision check below, so a same-basename warning there
+/// now means a genuine ambiguity worth knowing about, not this.
+fn extract_jar(
+    jar_path: &Path,
+    root: &Path,
+    component: &str,
+    exclude: &[String],
+    platform: &Platform,
+) -> Result<()> {
     let file = std::fs::File::open(jar_path)?;
     let mut archive = zip::ZipArchive::new(file)?;
 
@@ -122,6 +195,11 @@ fn extract_jar(jar_path: &Path, root: &Path, component: &str, exclude: &[String]
             || exclude.iter().any(|p| name.starts_with(p.as_str()))
         {
             continue;
+        }
+        if let Some((entry_os, entry_arch)) = jar_platform_prefix(&name) {
+            if !matches_platform(entry_os, entry_arch, platform) {
+                continue;
+            }
         }
 
         let Some(file_name) = Path::new(&name).file_name() else {
@@ -160,6 +238,24 @@ mod tests {
     use super::*;
     use crate::classpath::{native_component, ResolvedArtifact};
     use std::io::Write;
+
+    /// The platform every existing test in this module was written against
+    /// before `extract_jar` took a `Platform` parameter — linux/x86_64.
+    fn linux_x64() -> Platform {
+        Platform {
+            os_name: "linux".into(),
+            arch: "x86_64".into(),
+            os_version: String::new(),
+        }
+    }
+
+    fn windows_x64() -> Platform {
+        Platform {
+            os_name: "windows".into(),
+            arch: "x86_64".into(),
+            os_version: String::new(),
+        }
+    }
 
     fn make_test_jar(path: &Path, entries: &[(&str, &[u8])]) -> String {
         let file = std::fs::File::create(path).unwrap();
@@ -222,7 +318,7 @@ mod tests {
             ],
         );
 
-        let natives_dir = extract_natives(&paths, &[entry]).unwrap();
+        let natives_dir = extract_natives(&paths, &[entry], &linux_x64()).unwrap();
 
         // Available at the shared root (older, single-directory profiles),
         // under its own classified component (LWJGL's own extract path),
@@ -259,7 +355,7 @@ mod tests {
             )],
         );
 
-        let natives_dir = extract_natives(&paths, &[entry]).unwrap();
+        let natives_dir = extract_natives(&paths, &[entry], &linux_x64()).unwrap();
 
         assert!(natives_dir.join("liblwjgl.so").is_file());
         assert!(natives_dir.join("lwjgl").join("liblwjgl.so").is_file());
@@ -288,7 +384,7 @@ mod tests {
             )],
         );
 
-        let natives_dir = extract_natives(&paths, &[entry]).unwrap();
+        let natives_dir = extract_natives(&paths, &[entry], &linux_x64()).unwrap();
 
         assert!(natives_dir.join("java").join("liblwjgl.so").is_file());
     }
@@ -303,7 +399,7 @@ mod tests {
     fn every_native_component_directory_is_created_even_when_empty() {
         let dir = tempfile::tempdir().unwrap();
         let paths = Paths::at(dir.path());
-        let natives_dir = extract_natives(&paths, &[]).unwrap();
+        let natives_dir = extract_natives(&paths, &[], &linux_x64()).unwrap();
 
         for component in NATIVE_COMPONENTS {
             assert!(
@@ -313,17 +409,46 @@ mod tests {
         }
     }
 
+    /// Regression test for the real Windows crash this fixed: a single
+    /// modern native jar (e.g. LWJGL's `natives-windows`) bundles
+    /// `windows/x86/...`, `windows/x64/...`, and `windows/arm64/...` in one
+    /// archive. Extracting on an x86_64 machine must produce only the x64
+    /// bytes — not whichever architecture the zip iterator happened to
+    /// visit last — and must never even warn about a collision, since the
+    /// other architectures are filtered out before the collision check.
+    #[test]
+    fn multi_arch_native_jar_only_extracts_the_current_platforms_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let paths = Paths::at(dir.path());
+        let entry = store_jar(
+            &paths,
+            dir.path(),
+            "lwjgl-natives-windows.jar",
+            "org.lwjgl:lwjgl",
+            &[
+                ("windows/arm64/org/lwjgl/lwjgl.dll", b"arm64 bytes"),
+                ("windows/x86/org/lwjgl/lwjgl.dll", b"x86 bytes"),
+                ("windows/x64/org/lwjgl/lwjgl.dll", b"x64 bytes"),
+            ],
+        );
+
+        let natives_dir = extract_natives(&paths, &[entry], &windows_x64()).unwrap();
+
+        let extracted = std::fs::read(natives_dir.join("lwjgl.dll")).unwrap();
+        assert_eq!(extracted, b"x64 bytes");
+    }
+
     #[test]
     fn re_extraction_is_skipped_once_marker_exists() {
         let dir = tempfile::tempdir().unwrap();
         let paths = Paths::at(dir.path());
         let entries: Vec<NativesEntry> = vec![];
-        let natives_dir = extract_natives(&paths, &entries).unwrap();
+        let natives_dir = extract_natives(&paths, &entries, &linux_x64()).unwrap();
         std::fs::write(natives_dir.join("sentinel"), b"keep me").unwrap();
 
         // Second call with the same (empty) entry set must hit the marker
         // and not wipe the directory.
-        extract_natives(&paths, &entries).unwrap();
+        extract_natives(&paths, &entries, &linux_x64()).unwrap();
         assert!(natives_dir.join("sentinel").is_file());
     }
 }

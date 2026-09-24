@@ -298,7 +298,7 @@ impl Session {
         let platform = Platform::current();
         let features = FeatureFlags::default();
         let resolved = resolve_libraries(&profile, &platform, &features);
-        let natives_dir = extract_natives(&self.paths, &resolved.natives)?;
+        let natives_dir = extract_natives(&self.paths, &resolved.natives, &platform)?;
 
         let mut classpath = vec![self.paths.store_blob(&profile.downloads.client.sha1)];
         classpath.extend(
