@@ -84,6 +84,13 @@ impl Session {
             Vec::new()
         } else {
             let task_id = self.new_task_id("preset");
+            if let Ok(cfg) = self.instances().load(instance) {
+                self.presence.describe_task(
+                    &task_id,
+                    format!("Applying {name} to {}", cfg.name),
+                    None,
+                );
+            }
             self.tracked(&task_id, self.content_install(&task_id, instance, roots))
                 .await?
         };

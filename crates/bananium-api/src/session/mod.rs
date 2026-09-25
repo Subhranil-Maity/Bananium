@@ -5,6 +5,7 @@ mod instances;
 mod java;
 mod logs;
 mod modpacks;
+mod presence;
 mod presets;
 mod profiles;
 mod system;
@@ -28,6 +29,7 @@ use crate::command::Command;
 use crate::error::{Error, Result};
 use crate::event::Event;
 use crate::output::{CommandOutput, ResolvedPaths};
+use presence::Presence;
 
 /// Sent on every outgoing request. Mojang doesn't require this, but
 /// Modrinth's API (M4) rate-limits generic/missing agents — setting a
@@ -35,7 +37,7 @@ use crate::output::{CommandOutput, ResolvedPaths};
 const USER_AGENT: &str = concat!(
     "bananium/",
     env!("CARGO_PKG_VERSION"),
-    " (github.com/bananium/bananium)"
+    " (github.com/Subhranil-Maity/Bananium)"
 );
 
 /// The frontend facade. Every frontend — TUI, CLI, RPC, anything else —
@@ -55,6 +57,9 @@ pub struct Session {
     /// stopped: a pid alone isn't safe to kill (the OS may have reused it),
     /// but the `Child` handle held by the launch's wait task is.
     kill_switches: Arc<Mutex<HashMap<String, oneshot::Sender<()>>>>,
+    /// Discord Rich Presence. Inert until a frontend calls
+    /// [`Session::start_presence`].
+    presence: Arc<Presence>,
 }
 
 impl Session {
@@ -68,8 +73,10 @@ impl Session {
         // Progress is throttled at the source (see `download_tracked`), so
         // this only needs headroom for bursts, not for per-file floods.
         let (events_tx, _rx) = broadcast::channel(4096);
+        let presence = Arc::new(Presence::new(config.discord.clone()));
         Ok(Self {
             paths,
+            presence,
             config: RwLock::new(config),
             http,
             modrinth,
@@ -87,6 +94,19 @@ impl Session {
         self.events_tx.subscribe()
     }
 
+    /// Start Discord Rich Presence for this session: connect to the local
+    /// Discord client — retrying every few seconds for as long as it isn't
+    /// running ([`crate::PresenceStatus::Waiting`]) — and keep it showing
+    /// what's going on until the session ends. Only a
+    /// long-lived frontend should call this — the desktop app does; the
+    /// one-shot CLI and the TUI don't. Calling it again does nothing.
+    ///
+    /// Must be called from inside a Tokio runtime.
+    pub fn start_presence(&self) {
+        self.presence
+            .start(self.paths.clone(), self.events_tx.clone());
+    }
+
     fn emit(&self, event: Event) {
         // No receivers is a perfectly normal state (e.g. `--format json`
         // frontends that only care about the final result).
@@ -94,8 +114,8 @@ impl Session {
     }
 
     /// Run one `Command` to completion, returning its typed result. This is
-    /// the *entire* surface every frontend talks to — see PLAN.md's
-    /// "frontend contract."
+    /// the *entire* surface every frontend talks to — see the frontend
+    /// contract in CONTRIBUTING.md.
     pub async fn dispatch(&self, command: Command) -> Result<CommandOutput> {
         match command {
             Command::ConfigShow => self.config_show(),
@@ -274,6 +294,23 @@ impl Session {
             Command::ProfileAdd { name } => self.profile_add(&name),
             Command::ProfileRemove { name } => self.profile_remove(&name),
             Command::ProfileSetDefault { name } => self.profile_set_default(&name),
+            Command::DiscordConfigSet { config } => self.discord_config_set(config),
+            Command::InstanceSetDiscord { instance, hidden } => {
+                self.instance_set_discord(&instance, hidden)
+            }
+            Command::PresenceSetView { view } => self.presence_set_view(view),
+            Command::PresenceStatus => Ok(CommandOutput::PresenceStatusShown {
+                status: self.presence.status(),
+            }),
+            Command::PresencePreview { scenario, config } => Ok(CommandOutput::PresencePreviewed {
+                preview: self.presence.preview(scenario, config),
+            }),
+            Command::PresenceReconnect => {
+                self.presence.request_reconnect();
+                Ok(CommandOutput::PresenceStatusShown {
+                    status: self.presence.status(),
+                })
+            }
         }
     }
 
@@ -325,6 +362,14 @@ impl Session {
         fabric_loader: Option<&str>,
     ) -> Result<CommandOutput> {
         let task_id = self.new_task_id("install");
+        self.presence.describe_task(
+            &task_id,
+            format!(
+                "Installing {}",
+                name.unwrap_or(&format!("Minecraft {version}"))
+            ),
+            None,
+        );
         self.tracked(
             &task_id,
             self.install(&task_id, version, name, fabric_loader),
@@ -588,6 +633,12 @@ impl Session {
         let mut child = cmd.spawn()?;
         let pid = child.id().unwrap_or(0);
         instances.mark_running(&slug, pid, Some(&log_path))?;
+        self.emit(Event::InstanceLaunched {
+            instance: slug.clone(),
+            pid,
+            started_unix: timestamp,
+            player: ctx.player_name.clone(),
+        });
 
         // The caller gets the pid back immediately; this task outlives the
         // command. For a long-lived frontend (the desktop app, the TUI) it

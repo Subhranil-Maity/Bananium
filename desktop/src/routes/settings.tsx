@@ -10,12 +10,14 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import { DiscordSettings } from "@/components/discord-settings";
 import { JavaPicker } from "@/components/java-picker";
 import { Page, PageHeader, Section } from "@/components/page";
 import { useJavaList, useRemoveRuntime } from "@/hooks/use-java";
 import { errorMessage, run } from "@/lib/api";
 import { formatBytes } from "@/lib/utils";
 import { useTheme, type Theme } from "@/stores/theme";
+import { usePresenceView } from "@/lib/presence";
 
 const CONFIG_KEY = ["config"] as const;
 
@@ -163,8 +165,9 @@ function GameSettings({ config }: { config: Config }) {
   );
 }
 
-/** Appearance, Java and downloads, plus a read-only view of data paths. */
+/** Appearance, Java and downloads, Discord, plus a read-only view of data paths. */
 export function SettingsPage() {
+  usePresenceView({ view: "settings" });
   const { theme, setTheme } = useTheme();
   const { data, isLoading, error } = useQuery({
     queryKey: CONFIG_KEY,
@@ -198,6 +201,7 @@ export function SettingsPage() {
         {data && (
           <>
             <GameSettings key={JSON.stringify(data.config)} config={data.config} />
+            <DiscordSettings key={`discord-${JSON.stringify(data.config.discord)}`} config={data.config} />
             <Section
               title="Data locations"
               description="Set the BANANIUM_HOME environment variable to move everything."

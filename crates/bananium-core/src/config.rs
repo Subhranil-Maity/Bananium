@@ -20,6 +20,81 @@ pub struct Config {
     pub theme: String,
     /// Explicit JVM path, overriding auto-detection in `bananium_java::find_java`.
     pub java_path: Option<PathBuf>,
+    /// Discord Rich Presence settings (`[discord]` in `config.toml`).
+    #[serde(default)]
+    pub discord: DiscordConfig,
+}
+
+/// What the Discord member list shows next to the user's name.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
+#[serde(rename_all = "snake_case")]
+pub enum StatusDisplay {
+    /// "Playing Bananium" (Discord's default).
+    #[default]
+    Name,
+    /// The activity's first line, e.g. "Playing Minecraft 1.21.1".
+    Details,
+    /// The activity's second line, e.g. "Fabric · 49 mods".
+    State,
+}
+
+/// Discord Rich Presence settings. Everything is shown by default; each
+/// switch hides one detail. The struct is `serde(default)` so a partial
+/// `[discord]` table only overrides what it mentions.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
+#[serde(default)]
+pub struct DiscordConfig {
+    /// Master switch: off clears the presence and disconnects from Discord.
+    pub enabled: bool,
+    /// Show an activity while no game is running (browsing, installing,
+    /// idle in the launcher); off means presence only while playing.
+    pub show_in_launcher: bool,
+    /// Say what's being browsed on Modrinth, down to the project viewed.
+    pub show_browsing: bool,
+    /// Show installs and downloads, with a progress bar.
+    pub show_tasks: bool,
+    pub show_version: bool,
+    pub show_loader: bool,
+    pub show_loader_version: bool,
+    pub show_mod_count: bool,
+    /// The offline username being played as.
+    pub show_username: bool,
+    /// The instance's name (in the large image's tooltip).
+    pub show_instance_name: bool,
+    /// Put the instance name in the status line itself ("Playing My
+    /// Survival") instead of "Playing Minecraft 1.21.1".
+    pub instance_name_in_status: bool,
+    /// A Modrinth modpack's own icon as the large image.
+    pub show_modpack_icon: bool,
+    /// The "elapsed" timer.
+    pub show_elapsed: bool,
+    /// "View modpack" / "Get Bananium" link buttons.
+    pub show_buttons: bool,
+    pub status_display: StatusDisplay,
+}
+
+impl Default for DiscordConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            show_in_launcher: true,
+            show_browsing: true,
+            show_tasks: true,
+            show_version: true,
+            show_loader: true,
+            show_loader_version: true,
+            show_mod_count: true,
+            show_username: true,
+            show_instance_name: true,
+            instance_name_in_status: false,
+            show_modpack_icon: true,
+            show_elapsed: true,
+            show_buttons: true,
+            status_display: StatusDisplay::Name,
+        }
+    }
 }
 
 impl Default for Config {
@@ -28,6 +103,7 @@ impl Default for Config {
             max_concurrent_downloads: 8,
             theme: "banana".to_string(),
             java_path: None,
+            discord: DiscordConfig::default(),
         }
     }
 }
@@ -39,6 +115,7 @@ struct ConfigFile {
     max_concurrent_downloads: Option<usize>,
     theme: Option<String>,
     java_path: Option<PathBuf>,
+    discord: Option<DiscordConfig>,
 }
 
 /// The subset of `Config` a frontend may override directly (e.g. via CLI
@@ -70,6 +147,9 @@ impl Config {
             }
             if let Some(v) = file.java_path {
                 cfg.java_path = Some(v);
+            }
+            if let Some(v) = file.discord {
+                cfg.discord = v;
             }
         }
 
@@ -114,16 +194,7 @@ impl Config {
         max_concurrent_downloads: Option<usize>,
         java_path: Option<Option<PathBuf>>,
     ) -> Result<Self> {
-        let path = paths.config_toml();
-        let mut table: toml::Table = if path.is_file() {
-            let text = std::fs::read_to_string(&path)?;
-            toml::from_str(&text).map_err(|source| Error::TomlParse {
-                path: path.clone(),
-                source: Box::new(source),
-            })?
-        } else {
-            toml::Table::new()
-        };
+        let mut table = read_table(paths)?;
         if let Some(n) = max_concurrent_downloads {
             if n == 0 {
                 return Err(Error::Config(
@@ -147,11 +218,41 @@ impl Config {
             }
             None => {}
         }
-        let text = toml::to_string_pretty(&table)
-            .map_err(|e| Error::Config(format!("failed to write config.toml: {e}")))?;
-        std::fs::write(&path, text)?;
+        write_table(paths, &table)?;
         Self::load(paths, ConfigOverrides::default())
     }
+
+    /// Replace the `[discord]` table in `config.toml`, keeping every other
+    /// key, and return the re-loaded config.
+    pub fn update_discord(paths: &Paths, discord: &DiscordConfig) -> Result<Self> {
+        let mut table = read_table(paths)?;
+        let value = toml::Value::try_from(discord)
+            .map_err(|e| Error::Config(format!("failed to encode [discord]: {e}")))?;
+        table.insert("discord".into(), value);
+        write_table(paths, &table)?;
+        Self::load(paths, ConfigOverrides::default())
+    }
+}
+
+/// `config.toml` as a raw table (empty when the file doesn't exist), so an
+/// update can preserve keys this version doesn't know about.
+fn read_table(paths: &Paths) -> Result<toml::Table> {
+    let path = paths.config_toml();
+    if !path.is_file() {
+        return Ok(toml::Table::new());
+    }
+    let text = std::fs::read_to_string(&path)?;
+    toml::from_str(&text).map_err(|source| Error::TomlParse {
+        path,
+        source: Box::new(source),
+    })
+}
+
+fn write_table(paths: &Paths, table: &toml::Table) -> Result<()> {
+    let text = toml::to_string_pretty(table)
+        .map_err(|e| Error::Config(format!("failed to write config.toml: {e}")))?;
+    std::fs::write(paths.config_toml(), text)?;
+    Ok(())
 }
 
 #[cfg(test)]
@@ -213,5 +314,32 @@ mod tests {
         assert_eq!(cfg.java_path, None);
         assert_eq!(cfg.max_concurrent_downloads, 4);
         assert!(Config::update_file(&paths, Some(0), None).is_err());
+    }
+
+    #[test]
+    fn discord_table_round_trips_and_partial_tables_use_defaults() {
+        let dir = tempfile::tempdir().unwrap();
+        let paths = Paths::at(dir.path());
+        std::fs::write(
+            paths.config_toml(),
+            "theme = \"midnight\"\n[discord]\nshow_username = false\n",
+        )
+        .unwrap();
+        let cfg = Config::load(&paths, ConfigOverrides::default()).unwrap();
+        assert!(!cfg.discord.show_username);
+        assert!(cfg.discord.enabled, "unmentioned keys keep their defaults");
+
+        let wanted = DiscordConfig {
+            enabled: false,
+            status_display: StatusDisplay::Details,
+            ..DiscordConfig::default()
+        };
+        let cfg = Config::update_discord(&paths, &wanted).unwrap();
+        assert_eq!(cfg.discord, wanted);
+        assert_eq!(cfg.theme, "midnight");
+
+        // Other updates leave [discord] alone.
+        let cfg = Config::update_file(&paths, Some(3), None).unwrap();
+        assert_eq!(cfg.discord, wanted);
     }
 }

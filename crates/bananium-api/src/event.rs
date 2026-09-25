@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 
+use crate::presence::PresenceStatus;
+
 /// Everything a frontend can be told about while a `Command` runs. Every
 /// long-running task reports `Progress` under a stable `task_id`, so every
 /// frontend renders progress/cancellation/failure identically without
@@ -77,6 +79,20 @@ pub enum Event {
     InstanceExited {
         instance: String,
         exit_code: Option<i32>,
+    },
+    /// A game this session launched has started: `started_unix` (seconds)
+    /// is when, `player` the offline username it's playing as.
+    InstanceLaunched {
+        instance: String,
+        pid: u32,
+        #[cfg_attr(feature = "ts", ts(type = "number"))]
+        started_unix: u64,
+        player: String,
+    },
+    /// The Discord Rich Presence connection changed state (connecting,
+    /// connected, waiting for Discord, turned off).
+    PresenceStatusChanged {
+        status: PresenceStatus,
     },
 }
 

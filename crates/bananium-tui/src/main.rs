@@ -1,12 +1,11 @@
-//! ratatui frontend — the primary interface per PLAN.md. This is a first
-//! slice, not the full M2 scope: an instance list, running-status display,
-//! and launch. The log pane, task tray, and command palette PLAN.md
-//! describes for M2 are separate, later pieces — this exists to prove the
+//! ratatui frontend. This is a first slice: an instance list,
+//! running-status display, and launch. A live log pane, task tray, and
+//! command palette are separate, later pieces — this exists to prove the
 //! frontend contract holds through a real UI, not a stub.
 //!
 //! Depends only on `bananium-api` plus its own UI libraries (`ratatui`,
-//! `crossterm`) — a CI check enforces that (see PLAN.md's frontend
-//! contract).
+//! `crossterm`) — `scripts/check_frontend_deps.py` enforces that (see the
+//! frontend contract in CONTRIBUTING.md).
 
 use std::io::{self, Stdout};
 use std::time::Duration;
@@ -31,7 +30,7 @@ type Term = Terminal<CrosstermBackend<Stdout>>;
 
 /// Single-threaded runtime: this app has exactly one thing to do at a time
 /// (poll input or await a dispatch), so a multi-thread runtime would only
-/// cost RAM against PLAN.md's `< 40 MB` TUI budget for nothing in return.
+/// cost RAM against the TUI's `< 40 MB` budget for nothing in return.
 #[tokio::main(flavor = "current_thread")]
 async fn main() {
     bananium_api::init_logging();

@@ -1,7 +1,6 @@
 <div align="center">
 
-<!-- TODO: replace with the real logo -->
-<img src="docs/images/logo.png" alt="Bananium logo" width="128" height="128">
+<img src="docs/images/banner.svg" alt="Bananium: The Banana Launcher, a fast, lightweight, offline-first Minecraft launcher" width="100%">
 
 # Bananium: The Banana Launcher
 
@@ -9,9 +8,6 @@
 
 Instances, Fabric, Modrinth mods, shaders, resource packs, and modpacks in a
 clean desktop app that stays out of your RAM's way.
-
-<!-- TODO: replace with a hero screenshot of the Library -->
-<img src="docs/images/hero.png" alt="Bananium desktop app: Library" width="900">
 
 </div>
 
@@ -44,7 +40,6 @@ and working.
 
 ### Library
 
-<!-- TODO: screenshot -->
 <img src="docs/images/library.png" alt="Library screen" width="800">
 
 All your instances in one place.
@@ -60,8 +55,7 @@ All your instances in one place.
 
 ### Instance page
 
-<!-- TODO: screenshot -->
-<img src="docs/images/instance.png" alt="Instance page" width="800">
+<img src="docs/images/instance.png" alt="Instance page header: icon, loader and Minecraft version, last played, playtime and mod count">
 
 Each instance has a header with its icon, group, last played time, and total
 playtime, plus these tabs:
@@ -74,7 +68,6 @@ playtime, plus these tabs:
 | **Screenshots** | That instance's screenshots |
 | **Settings** | Max memory (`-Xmx`), Java override, extra JVM arguments, group, and delete |
 
-<!-- TODO: screenshots of the Content, Logs and Files tabs -->
 <p>
   <img src="docs/images/content.png" alt="Content tab" width="32%">
   <img src="docs/images/logs.png" alt="Logs tab" width="32%">
@@ -83,7 +76,6 @@ playtime, plus these tabs:
 
 ### Browse Modrinth
 
-<!-- TODO: screenshot -->
 <img src="docs/images/browse.png" alt="Browse Modrinth screen" width="800">
 
 Search Modrinth for **mods, resource packs, shaders, and modpacks**.
@@ -98,7 +90,6 @@ Search Modrinth for **mods, resource packs, shaders, and modpacks**.
 
 ### Presets
 
-<!-- TODO: screenshot -->
 <img src="docs/images/presets.png" alt="Presets screen" width="800">
 
 Save an instance's Modrinth content as a preset, then apply it to any other
@@ -107,7 +98,6 @@ Presets can be renamed, exported, and imported to share with friends.
 
 ### Screenshots
 
-<!-- TODO: screenshot -->
 <img src="docs/images/screenshots.png" alt="Screenshots gallery" width="800">
 
 One gallery with every instance's screenshots. Filter by instance, page
@@ -120,11 +110,28 @@ sidebar. Accounts use the standard offline-mode UUID, so they work in
 singleplayer, on LAN, and on offline-mode servers. No auth server is ever
 contacted.
 
+> Bananium is meant for people who own Minecraft. Please buy the game to
+> support Mojang. Signing in with a Microsoft account is under consideration
+> for a future release.
+
 ### Settings
 
 Theme (dark or light), default Java (automatic uses Mojang's runtime for each
-version), installed Mojang runtimes, parallel downloads, and quick links to
-every data folder.
+version), installed Mojang runtimes, parallel downloads, Discord Rich
+Presence, and quick links to every data folder.
+
+### Discord Rich Presence
+
+With the Discord desktop app open, your profile shows **Playing Bananium**
+with what you're up to: the Minecraft version, mod loader, mod count and
+username while you play (with the modpack's own icon), or browsing Modrinth
+and installing, with a progress bar, while you're in the launcher.
+
+- Every detail has its own switch in **Settings → Discord Rich Presence**,
+  with a live preview of the card.
+- Hide any single instance from Discord in its **Settings** tab.
+- If Discord isn't running, Bananium quietly checks again every 5 seconds,
+  so closing Discord and opening it later just works.
 
 ### Everywhere in the app
 
@@ -548,33 +555,15 @@ are generated from the Rust types with ts-rs.
 
 ## Contributing
 
-Run these checks before sending changes:
-
-```sh
-(cd desktop && bun install && bun run build)
-cargo build --workspace
-cargo test --workspace
-cargo fmt --all -- --check
-cargo clippy --workspace --all-targets -- -D warnings
-cargo doc --workspace --no-deps
-python3 scripts/check_frontend_deps.py
-(cd desktop && bun run typecheck && bun run lint)
-```
-
-If you change any `Command`, `CommandOutput`, `Event`, or shared type,
-regenerate the TypeScript bindings:
-
-```sh
-cargo test -p bananium-api --features ts
-```
-
-Use **bun** (not npm) for everything in `desktop/`.
+Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for how the
+project is laid out, the rules every change has to follow, and the checks to
+run before opening a pull request.
 
 ---
 
 ## License
 
-Licensed under MIT.
+Licensed under the [MIT License](LICENSE).
 
 Bananium is not affiliated with or endorsed by Mojang Studios or Microsoft.
 Minecraft is a trademark of Mojang Studios.

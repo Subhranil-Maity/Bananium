@@ -161,7 +161,7 @@ pub fn build_launch_plan(
 }
 
 /// Build the `${key}` -> value map every argument token gets substituted
-/// against. Covers both the placeholders PLAN.md enumerates and a few more
+/// against. Covers the standard launcher placeholders and a few more
 /// that real Mojang profiles reference (`launcher_name`, `clientid`,
 /// `resolution_width`/`height`, ...) so `--dry-run` output never shows an
 /// unresolved `${...}` for a real profile.

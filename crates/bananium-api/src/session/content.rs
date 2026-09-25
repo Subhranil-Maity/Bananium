@@ -392,6 +392,10 @@ impl Session {
         roots: Vec<(String, Option<String>, ContentKind)>,
     ) -> Result<CommandOutput> {
         let task_id = self.new_task_id("content");
+        if let Ok(cfg) = self.instances().load(instance) {
+            self.presence
+                .describe_task(&task_id, format!("Adding content to {}", cfg.name), None);
+        }
         let installed = self
             .tracked(&task_id, self.content_install(&task_id, instance, roots))
             .await?;

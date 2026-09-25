@@ -5,6 +5,7 @@ pub mod command;
 pub mod error;
 pub mod event;
 pub mod output;
+pub mod presence;
 pub mod session;
 
 pub use command::{Command, ModpackSource, SearchSort};
@@ -15,11 +16,15 @@ pub use output::{
     JavaInstall, LogFile, ModpackSummary, ModrinthHit, ModrinthProject, ModrinthVersion,
     ProfileSummary, ResolvedPaths, Screenshot, SkippedEntry, VersionSummary,
 };
+pub use presence::{
+    LauncherView, PresencePreview, PresenceStatus, PreviewButton, PreviewScenario, DISCORD_APP_ID,
+    RETRY_INTERVAL_SECS,
+};
 pub use session::Session;
 
 // Re-exported so frontends can construct a `Session` without depending on
 // bananium-core directly (frontend crates depend only on bananium-api).
-pub use bananium_core::{Config, ConfigOverrides, Paths};
+pub use bananium_core::{Config, ConfigOverrides, DiscordConfig, Paths, StatusDisplay};
 
 /// Re-exported so a frontend can validate a user-typed instance name (and
 /// re-prompt immediately on a bad one) without round-tripping through

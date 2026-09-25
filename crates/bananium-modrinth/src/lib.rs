@@ -9,7 +9,7 @@
 //!
 //! This crate is deliberately only the HTTP layer: it does **not** include
 //! the SQLite/FTS5 offline mirror, the mod lockfile, or dependency
-//! resolution that the rest of PLAN.md's M4 describes — those build on top
+//! resolution — those build on top
 //! of this client and live elsewhere.
 
 mod client;

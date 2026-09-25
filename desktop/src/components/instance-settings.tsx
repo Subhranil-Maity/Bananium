@@ -77,6 +77,13 @@ export function InstanceSettings({ instance }: { instance: InstanceSummary }) {
     onError: (err) => toast.error("Save failed", { description: errorMessage(err) }),
   });
 
+  const hideOnDiscord = useMutation({
+    mutationFn: (hidden: boolean) =>
+      run({ command: "instance_set_discord", instance: instance.slug, hidden }, "instance_updated"),
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: INSTANCES_KEY }),
+    onError: (err) => toast.error("Couldn't change Discord visibility", { description: errorMessage(err) }),
+  });
+
   // What "default" means for this instance: the global Java setting if one
   // is set, otherwise Mojang's runtime for this version.
   const runtime = useInstanceJava(instance.slug);
@@ -213,6 +220,17 @@ export function InstanceSettings({ instance }: { instance: InstanceSummary }) {
               <Copy /> Duplicate
             </Button>
           </div>
+        </Row>
+        <Row
+          label="Hide on Discord"
+          hint={'Rich Presence shows only a generic "Playing Minecraft" while this instance runs.'}
+        >
+          <Switch
+            className="mt-1.5"
+            checked={instance.discord_hidden}
+            disabled={hideOnDiscord.isPending}
+            onCheckedChange={(hidden) => hideOnDiscord.mutate(hidden)}
+          />
         </Row>
       </Section>
 

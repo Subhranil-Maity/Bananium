@@ -8,6 +8,7 @@ members = [
     "crates/bananium-meta",
     "crates/bananium-java",
     "crates/bananium-modrinth",
+    "crates/bananium-discord",
     "crates/bananium-instance",
     "crates/bananium-launch",
     "crates/bananium-tui",
@@ -19,7 +20,7 @@ members = [
 [workspace.package]
 version = "0.1.0"
 edition = "2021"
-license = "MIT OR Apache-2.0"
+license = "MIT"
 
 [profile.release]
 lto = "fat"

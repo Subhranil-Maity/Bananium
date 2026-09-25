@@ -1,6 +1,5 @@
-//! Integration tests against a local `wiremock` server, per PLAN.md's
-//! verification section ("`wiremock` for all HTTP ... including rate-limit
-//! headers, 5xx retry"). Every test uses short synthetic durations rather
+//! Integration tests against a local `wiremock` server, covering all HTTP
+//! behavior including rate-limit headers and 5xx retry. Every test uses short synthetic durations rather
 //! than the real 60s rate-limit window, so the suite stays fast.
 
 use std::sync::atomic::{AtomicUsize, Ordering};

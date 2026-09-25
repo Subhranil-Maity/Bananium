@@ -41,8 +41,8 @@ pub struct NativesEntry {
 pub const NATIVE_COMPONENTS: &[&str] = &["java", "jna", "lwjgl", "netty"];
 
 /// Classify a library's maven `group:artifact` into the native-loading
-/// subsystem it belongs to. Newer Mojang profiles (see PLAN.md's note on
-/// this being a moving target) pass each of the JVM's four
+/// subsystem it belongs to. Newer Mojang profiles (this is a moving
+/// target across versions) pass each of the JVM's four
 /// native-library-loading properties a *different* subdirectory of
 /// `${natives_directory}` — `-Djava.library.path=.../java`,
 /// `-Djna.tmpdir=.../jna`,

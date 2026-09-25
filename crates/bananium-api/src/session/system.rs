@@ -3,7 +3,7 @@
 use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
 
-use bananium_core::Config;
+use bananium_core::{Config, DiscordConfig};
 
 use super::Session;
 use crate::error::{Error, Result};
@@ -26,6 +26,24 @@ impl Session {
         let updated = Config::update_file(&self.paths, max_concurrent_downloads, java_path)?;
         *self.config.write().expect("config lock poisoned") = updated;
         self.config_show()
+    }
+
+    /// `Command::DiscordConfigSet`: persist `[discord]` and apply it to the
+    /// running presence.
+    pub(super) fn discord_config_set(&self, discord: DiscordConfig) -> Result<CommandOutput> {
+        let updated = Config::update_discord(&self.paths, &discord)?;
+        self.presence.update_config(updated.discord.clone());
+        *self.config.write().expect("config lock poisoned") = updated;
+        self.config_show()
+    }
+
+    /// `Command::PresenceSetView`.
+    pub(super) fn presence_set_view(
+        &self,
+        view: crate::presence::LauncherView,
+    ) -> Result<CommandOutput> {
+        self.presence.set_view(view, &self.instances());
+        Ok(CommandOutput::PresenceViewSet)
     }
 
     /// `Command::ScreenshotList`: PNGs from every instance's (or one

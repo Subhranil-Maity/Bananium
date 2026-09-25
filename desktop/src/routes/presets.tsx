@@ -31,6 +31,7 @@ import { useInstances } from "@/hooks/use-instances";
 import { PRESETS_KEY, useApplyPreset, usePresets, useSavePreset } from "@/hooks/use-presets";
 import { errorMessage, run } from "@/lib/api";
 import { KINDS } from "@/lib/content";
+import { usePresenceView } from "@/lib/presence";
 
 /** Mirrors `bananium_instance::presets::is_valid_preset_name`. */
 function validPresetName(name: string) {
@@ -254,6 +255,7 @@ function PresetCard({ preset }: { preset: Preset }) {
 
 /** Saved content presets: create from an instance, apply to others, share as files. */
 export function PresetsPage() {
+  usePresenceView({ view: "presets" });
   const queryClient = useQueryClient();
   const { data: presets, isLoading, error } = usePresets();
   const [saving, setSaving] = useState(false);

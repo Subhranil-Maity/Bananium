@@ -13,6 +13,7 @@ import { useInstallContent } from "@/hooks/use-content";
 import { errorMessage, run } from "@/lib/api";
 import { formatCount, type BrowseKind } from "@/lib/content";
 import { cn } from "@/lib/utils";
+import { usePresenceView } from "@/lib/presence";
 
 const VERSION_TYPE: Record<string, string> = {
   release: "bg-success/15 text-success",
@@ -23,11 +24,14 @@ const VERSION_TYPE: Record<string, string> = {
 /** Full Modrinth project view: description, gallery, versions with install buttons. */
 export function ProjectSheet({
   projectId,
+  author,
   kind,
   instance,
   onOpenChange,
 }: {
   projectId: string | null;
+  /** Shown on Discord as "by …" while the sheet is open. */
+  author?: string | null;
   kind: BrowseKind;
   instance: string | null;
   onOpenChange: (open: boolean) => void;
@@ -58,6 +62,17 @@ export function ProjectSheet({
   });
 
   const p = project.data;
+  usePresenceView(
+    p && projectId !== null
+      ? {
+          view: "project",
+          title: p.title,
+          author: author ?? null,
+          icon_url: p.icon_url,
+          url: `https://modrinth.com/project/${p.slug ?? p.id}`,
+        }
+      : null,
+  );
   const links = p
     ? ([
         ["Modrinth", `https://modrinth.com/project/${p.slug ?? p.id}`],

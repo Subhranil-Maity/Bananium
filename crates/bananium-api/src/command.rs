@@ -1,7 +1,10 @@
 use std::path::PathBuf;
 
+use bananium_core::DiscordConfig;
 use bananium_instance::ContentKind;
 use serde::{Deserialize, Serialize};
+
+use crate::presence::{LauncherView, PreviewScenario};
 
 /// Sort order for `Command::ModrinthSearch`.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -37,7 +40,7 @@ pub enum ModpackSource {
 
 /// Every action a frontend can ask for. New variants land milestone by
 /// milestone; nothing outside `bananium-api` may add capability that isn't
-/// expressed here first (see PLAN.md's frontend contract).
+/// expressed here first (see the frontend contract in CONTRIBUTING.md).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 #[serde(tag = "command", rename_all = "snake_case")]
@@ -392,4 +395,32 @@ pub enum Command {
     ProfileSetDefault {
         name: String,
     },
+    /// Save the Discord Rich Presence settings (`[discord]` in
+    /// `config.toml`) and apply them to the live presence immediately.
+    DiscordConfigSet {
+        config: DiscordConfig,
+    },
+    /// Hide an instance from Discord (a generic "Playing Minecraft" while
+    /// it runs), or show it again.
+    InstanceSetDiscord {
+        instance: String,
+        hidden: bool,
+    },
+    /// Tell Rich Presence which launcher page the user is on.
+    PresenceSetView {
+        view: LauncherView,
+    },
+    /// Where the Discord connection stands.
+    PresenceStatus,
+    /// The activity Discord would show for `scenario`, under `config` (the
+    /// saved settings when omitted) — for a live preview while editing.
+    PresencePreview {
+        #[serde(default)]
+        scenario: PreviewScenario,
+        #[serde(default)]
+        config: Option<DiscordConfig>,
+    },
+    /// Try reaching Discord right now instead of at the next retry
+    /// (or reconnect, when already connected).
+    PresenceReconnect,
 }

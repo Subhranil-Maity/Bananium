@@ -270,14 +270,19 @@ impl Session {
             }
         }
 
-        let (pack_path, icon_url) = match source {
-            ModpackSource::File { path } => (path.clone(), None),
+        let (pack_path, icon_url, project_slug) = match source {
+            ModpackSource::File { path } => (path.clone(), None, None),
             ModpackSource::Modrinth { project, version } => {
                 self.fetch_modrinth_pack(task_id, project, version.as_deref())
                     .await?
             }
         };
         let index = read_index(&pack_path)?;
+        self.presence.describe_task(
+            task_id,
+            format!("Installing {}", index.name),
+            icon_url.clone(),
+        );
         let summary = index.summary();
         if let Some(reason) = summary.unsupported {
             return Err(Error::UnsupportedModpack(reason));
@@ -342,9 +347,14 @@ impl Session {
         finishing("Applying pack configs", 0);
         extract_overrides(&pack_path, &game_dir)?;
 
-        if let Some(group) = group.filter(|g| !g.trim().is_empty()) {
+        let group = group.filter(|g| !g.trim().is_empty());
+        if group.is_some() || project_slug.is_some() || icon_url.is_some() {
             let mut cfg = store.load(slug)?;
-            cfg.group = Some(group.trim().to_string());
+            if let Some(group) = group {
+                cfg.group = Some(group.trim().to_string());
+            }
+            cfg.modrinth_project = project_slug;
+            cfg.modrinth_icon_url = icon_url.clone();
             store.save(slug, &cfg)?;
         }
         if let Some(url) = icon_url {
@@ -365,14 +375,19 @@ impl Session {
     }
 
     /// Download a Modrinth modpack version's `.mrpack` into the store,
-    /// returning its path and the project's icon URL.
+    /// returning its path, the project's icon URL, and its slug.
     async fn fetch_modrinth_pack(
         &self,
         task_id: &str,
         project: &str,
         version_id: Option<&str>,
-    ) -> Result<(PathBuf, Option<String>)> {
+    ) -> Result<(PathBuf, Option<String>, Option<String>)> {
         let info = self.modrinth.project(project).await?;
+        self.presence.describe_task(
+            task_id,
+            format!("Installing {}", info.title),
+            info.icon_url.clone(),
+        );
         let mut versions = self
             .modrinth
             .project_versions(project, &VersionsFilter::default())
@@ -421,7 +436,7 @@ impl Session {
             }],
         )
         .await?;
-        Ok((dest, info.icon_url))
+        Ok((dest, info.icon_url, info.slug))
     }
 
     /// Download `url` and make it `slug`'s icon.

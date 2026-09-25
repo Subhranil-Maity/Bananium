@@ -1,6 +1,6 @@
 //! Tauri desktop frontend. Depends only on `bananium-api` plus its own UI
 //! libraries (tauri and its plugins) — `scripts/check_frontend_deps.py`
-//! enforces that (see PLAN.md's frontend contract).
+//! enforces that (see the frontend contract in CONTRIBUTING.md).
 //!
 //! This crate is deliberately a thin bridge: the React webview sends
 //! serialized `Command`s through the single `dispatch` Tauri command, and
@@ -84,6 +84,10 @@ fn main() {
                     }
                 }
             });
+            // Discord Rich Presence runs for the app's whole lifetime; it
+            // needs the Tokio runtime, which `setup` itself isn't inside.
+            let presence = session.clone();
+            tauri::async_runtime::spawn(async move { presence.start_presence() });
             app.manage(session);
             Ok(())
         })

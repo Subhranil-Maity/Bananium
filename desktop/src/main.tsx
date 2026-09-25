@@ -17,6 +17,7 @@ import { SettingsPage } from "@/routes/settings";
 import { AboutPage } from "@/routes/about";
 import { INSTANCES_KEY } from "@/hooks/use-instances";
 import { onEvent } from "@/lib/api";
+import { PRESENCE_STATUS_KEY } from "@/lib/presence";
 import { useTasks } from "@/stores/tasks";
 
 const queryClient = new QueryClient({
@@ -30,8 +31,12 @@ const queryClient = new QueryClient({
 // One global subscription: task events feed the tray; a game exiting
 // refreshes the instance list so Play/Stop flips immediately.
 void onEvent((event) => {
-  if (event.event === "instance_exited") {
+  if (event.event === "instance_exited" || event.event === "instance_launched") {
     void queryClient.invalidateQueries({ queryKey: INSTANCES_KEY });
+    return;
+  }
+  if (event.event === "presence_status_changed") {
+    queryClient.setQueryData(PRESENCE_STATUS_KEY, event.status);
     return;
   }
   useTasks.getState().apply(event);

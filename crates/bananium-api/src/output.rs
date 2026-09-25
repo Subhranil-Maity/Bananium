@@ -4,6 +4,8 @@ use bananium_core::Config;
 use bananium_instance::{ContentEntry, ContentKind, Preset};
 use serde::Serialize;
 
+use crate::presence::{PresencePreview, PresenceStatus};
+
 /// The subset of `Paths` surfaced to frontends, for `bananium config show`.
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
@@ -54,6 +56,10 @@ pub struct InstanceSummary {
     pub playtime_secs: u64,
     /// Enabled mods in `mods/`.
     pub mod_count: u32,
+    /// Hidden from Discord Rich Presence (see `Command::InstanceSetDiscord`).
+    pub discord_hidden: bool,
+    /// Slug of the Modrinth modpack it was installed from, if any.
+    pub modrinth_project: Option<String>,
 }
 
 /// One Modrinth search result.
@@ -456,6 +462,15 @@ pub enum CommandOutput {
     ProfileDefaultSet {
         name: String,
     },
+    PresenceStatusShown {
+        status: PresenceStatus,
+    },
+    /// `None` when nothing would be shown (e.g. launcher activity is off
+    /// and no game is running).
+    PresencePreviewed {
+        preview: Option<PresencePreview>,
+    },
+    PresenceViewSet,
 }
 
 /// One saved offline profile (a username to play as).

@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Enforce PLAN.md's frontend contract, rule 1: a frontend crate may depend
+"""Enforce the frontend contract (CONTRIBUTING.md), rule 1: a frontend crate may depend
 on bananium-api and its own UI libraries, and nothing else in the workspace.
 
 Exits non-zero (and prints exactly what's wrong) the moment a frontend
 crate's Cargo.toml names a `bananium-*` workspace crate as a dependency
 other than bananium-api. That's the one check standing between "the
-contract is a comment in PLAN.md" and "the contract is actually true."
+contract is a comment in CONTRIBUTING.md" and "the contract is actually true."
 """
 
 import sys
@@ -45,7 +45,7 @@ def check_crate(name: str, manifest_rel: str) -> list[str]:
             if dep_name.startswith("bananium-") and dep_name != ALLOWED_WORKSPACE_DEP:
                 violations.append(
                     f"{name} depends on {dep_name!r}, but frontend crates may only depend on "
-                    f"{ALLOWED_WORKSPACE_DEP!r} within the workspace (see PLAN.md: 'The frontend contract')"
+                    f"{ALLOWED_WORKSPACE_DEP!r} within the workspace (see CONTRIBUTING.md: 'The frontend contract')"
                 )
     return violations
 

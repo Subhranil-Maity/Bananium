@@ -158,7 +158,7 @@ pub struct DownloadArtifact {
 
 /// Which Mojang java-runtime component a version needs, and its major
 /// version (informational — the component name is what actually drives
-/// provisioning, per PLAN.md's "Java the Mojang way" section).
+/// provisioning of Mojang's own runtime).
 #[derive(Debug, Clone, Deserialize)]
 pub struct JavaVersionRef {
     pub component: String,

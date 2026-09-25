@@ -44,7 +44,13 @@ export const useTasks = create<TasksState>((set) => ({
   tasks: {},
   apply: (event) =>
     set(({ tasks }) => {
-      if (event.event === "log" || event.event === "instance_exited") return { tasks };
+      if (
+        event.event === "log" ||
+        event.event === "instance_exited" ||
+        event.event === "instance_launched" ||
+        event.event === "presence_status_changed"
+      )
+        return { tasks };
       // Per-file progress ids are "<parent task>/<file>"; fold them into the parent.
       const id = event.task_id.split("/")[0];
       const prev = tasks[id] ?? blank(id);

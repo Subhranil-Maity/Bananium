@@ -19,7 +19,7 @@ pub use error::{Error, Result};
 pub use presets::{Preset, PresetEntry, PresetStore};
 
 /// Which mod loader an instance uses. Quilt and Forge/NeoForge aren't
-/// supported (see PLAN.md M5/M6).
+/// supported yet.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Loader {
@@ -63,6 +63,19 @@ pub struct InstanceConfig {
     /// library ("Modded", "Servers", ...); `None` is ungrouped.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub group: Option<String>,
+    /// Slug of the Modrinth modpack this instance was installed from, for
+    /// linking back to it (e.g. a "View modpack" button on Discord).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub modrinth_project: Option<String>,
+    /// The modpack's icon on Modrinth's CDN. The local copy (see
+    /// [`InstanceStore::icon`]) is what the launcher shows; this URL is for
+    /// places that need a public link, like Discord Rich Presence.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub modrinth_icon_url: Option<String>,
+    /// Don't reveal this instance on Discord: presence shows a generic
+    /// "Playing Minecraft" while it runs.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub discord_hidden: bool,
 }
 
 /// The contents of an instance's `stats.toml`: play history, recorded by
@@ -156,6 +169,9 @@ impl InstanceStore {
             ram_mb: None,
             jvm_args: Vec::new(),
             group: None,
+            modrinth_project: None,
+            modrinth_icon_url: None,
+            discord_hidden: false,
         };
         self.save(&slug, &cfg)?;
         std::fs::create_dir_all(self.paths.instance_minecraft_dir(&slug))?;

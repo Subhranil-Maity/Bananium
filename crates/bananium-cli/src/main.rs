@@ -1,5 +1,6 @@
 //! clap frontend. Depends only on `bananium-api` plus its own UI library
-//! (clap) — a CI check enforces that (see PLAN.md's frontend contract).
+//! (clap) — `scripts/check_frontend_deps.py` enforces that
+//! (see the frontend contract in CONTRIBUTING.md).
 
 use std::io::{IsTerminal, Write};
 
@@ -507,6 +508,9 @@ impl ProgressPrinter {
             // The CLI exits right after `launch` returns, long before any
             // game does, so it never observes this.
             Event::InstanceExited { .. } => {}
+            // `launch` prints the pid from its result; the CLI never starts
+            // Discord Rich Presence.
+            Event::InstanceLaunched { .. } | Event::PresenceStatusChanged { .. } => {}
         }
     }
 }
@@ -869,5 +873,10 @@ fn print_output(output: &CommandOutput, as_json: bool) {
         CommandOutput::ProfileDefaultSet { name } => {
             println!("default profile is now {name:?}");
         }
+        // Rich Presence runs only in the desktop app; the CLI has no
+        // subcommands that produce these.
+        CommandOutput::PresenceStatusShown { .. }
+        | CommandOutput::PresencePreviewed { .. }
+        | CommandOutput::PresenceViewSet => {}
     }
 }

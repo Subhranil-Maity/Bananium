@@ -15,9 +15,11 @@ import {
 } from "@/hooks/use-profiles";
 import { errorMessage } from "@/lib/api";
 import { cn } from "@/lib/utils";
+import { usePresenceView } from "@/lib/presence";
 
 /** Manage offline accounts: add, choose who you play as, remove. */
 export function AccountsPage() {
+  usePresenceView({ view: "accounts" });
   const { data: profiles, isLoading, error } = useProfiles();
   const add = useAddProfile();
   const remove = useRemoveProfile();

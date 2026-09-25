@@ -19,6 +19,7 @@ import { pickIconFile, useInstance, useSetIcon } from "@/hooks/use-instances";
 import { loaderLabel } from "@/lib/instances";
 import { formatPlaytime, formatRelative } from "@/lib/utils";
 import { ScreenshotsPage } from "@/routes/screenshots";
+import { usePresenceView } from "@/lib/presence";
 
 type Tab = "content" | "files" | "logs" | "screenshots" | "settings";
 
@@ -99,6 +100,7 @@ function Header({ instance }: { instance: InstanceSummary }) {
 /** One instance: header with play/stop and stats, then content, logs, screenshots and settings. */
 export function InstancePage() {
   const { slug } = useParams();
+  usePresenceView(slug ? { view: "instance", instance: slug } : null);
   const navigate = useNavigate();
   const { data: instance, isLoading } = useInstance(slug);
   const [tab, setTab] = useState<Tab>(() => (instance?.running ? "logs" : "content"));

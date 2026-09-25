@@ -5,6 +5,6 @@ pub mod error;
 pub mod logging;
 pub mod paths;
 
-pub use config::{Config, ConfigOverrides};
+pub use config::{Config, ConfigOverrides, DiscordConfig, StatusDisplay};
 pub use error::{Error, Result};
 pub use paths::Paths;

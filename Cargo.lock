@@ -311,6 +311,7 @@ name = "bananium-api"
 version = "0.1.0"
 dependencies = [
  "bananium-core",
+ "bananium-discord",
  "bananium-instance",
  "bananium-java",
  "bananium-launch",
@@ -363,6 +364,17 @@ dependencies = [
  "tauri-plugin-dialog",
  "tauri-plugin-opener",
  "tokio",
+]
+
+[[package]]
+name = "bananium-discord"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "thiserror 2.0.20",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]

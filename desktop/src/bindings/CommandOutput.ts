@@ -11,6 +11,8 @@ import type { ModpackSummary } from "./ModpackSummary";
 import type { ModrinthHit } from "./ModrinthHit";
 import type { ModrinthProject } from "./ModrinthProject";
 import type { ModrinthVersion } from "./ModrinthVersion";
+import type { PresencePreview } from "./PresencePreview";
+import type { PresenceStatus } from "./PresenceStatus";
 import type { Preset } from "./Preset";
 import type { ProfileSummary } from "./ProfileSummary";
 import type { ResolvedPaths } from "./ResolvedPaths";
@@ -66,4 +68,4 @@ skipped_local: number, } | { "result": "preset_applied", instance: string,
 /**
  * Everything installed, dependencies included.
  */
-applied: Array<ContentEntry>, skipped: Array<SkippedEntry>, } | { "result": "preset_deleted", name: string, } | { "result": "preset_renamed", name: string, } | { "result": "preset_exported", path: string, } | { "result": "preset_imported", preset: Preset, } | { "result": "profile_listed", profiles: Array<ProfileSummary>, } | { "result": "profile_added", profile: ProfileSummary, } | { "result": "profile_removed", name: string, } | { "result": "profile_default_set", name: string, };
+applied: Array<ContentEntry>, skipped: Array<SkippedEntry>, } | { "result": "preset_deleted", name: string, } | { "result": "preset_renamed", name: string, } | { "result": "preset_exported", path: string, } | { "result": "preset_imported", preset: Preset, } | { "result": "profile_listed", profiles: Array<ProfileSummary>, } | { "result": "profile_added", profile: ProfileSummary, } | { "result": "profile_removed", name: string, } | { "result": "profile_default_set", name: string, } | { "result": "presence_status_shown", status: PresenceStatus, } | { "result": "presence_previewed", preview: PresencePreview | null, } | { "result": "presence_view_set" };

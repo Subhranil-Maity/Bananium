@@ -26,6 +26,7 @@ import { BROWSE_KINDS, formatCount, type BrowseKind } from "@/lib/content";
 import { useNewInstance } from "@/components/new-instance-dialog";
 import { loaderLabel } from "@/lib/instances";
 import { cn, formatRelative } from "@/lib/utils";
+import { usePresenceView } from "@/lib/presence";
 
 const PAGE = 20;
 const ANY = "__any__";
@@ -229,6 +230,7 @@ export function BrowsePage() {
   const [sort, setSort] = useState<SearchSort>("relevance");
   const [categories, setCategories] = useState<string[]>([]);
   const [openProject, setOpenProject] = useState<string | null>(null);
+  usePresenceView({ view: "browse", kind });
   const debouncedQuery = useDebounced(query, 300);
   const { data: instances } = useInstances();
   const target = instances?.find((i) => i.slug === instance);
@@ -424,6 +426,7 @@ export function BrowsePage() {
 
       <ProjectSheet
         projectId={openProject}
+        author={hits.find((h) => h.project_id === openProject)?.author ?? null}
         kind={kind}
         instance={instance}
         onOpenChange={(o) => !o && setOpenProject(null)}

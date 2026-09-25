@@ -97,7 +97,7 @@ impl Paths {
         self.home.join("cache").join("http")
     }
 
-    /// Not in the top-level layout diagram in PLAN.md, but required to give
+    /// Not part of the top-level data layout, but required to give
     /// Mojang's asset objects the exact on-disk shape the JVM expects
     /// (`objects/<hash[0..2]>/<hash>`, `indexes/<id>.json`, and legacy
     /// `virtual/<id>/...`) while still deduplicating the underlying bytes in

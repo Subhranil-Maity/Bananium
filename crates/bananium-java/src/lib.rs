@@ -4,8 +4,8 @@
 //! -> the java-runtime manifest -> a full file tree with `link`/`executable`
 //! handling) and lays them out on disk; downloading them is `bananium-api`'s
 //! job. The rest of this crate detects JVMs already on the machine, for
-//! users who pick their own. The aarch64-Linux Adoptium fallback PLAN.md
-//! describes is not implemented.
+//! users who pick their own. There is no Adoptium fallback for platforms
+//! Mojang doesn't publish runtimes for (such as aarch64 Linux).
 
 pub mod runtime;
 

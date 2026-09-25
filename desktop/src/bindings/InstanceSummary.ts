@@ -47,4 +47,12 @@ playtime_secs: number,
 /**
  * Enabled mods in `mods/`.
  */
-mod_count: number, };
+mod_count: number, 
+/**
+ * Hidden from Discord Rich Presence (see `Command::InstanceSetDiscord`).
+ */
+discord_hidden: boolean, 
+/**
+ * Slug of the Modrinth modpack it was installed from, if any.
+ */
+modrinth_project: string | null, };

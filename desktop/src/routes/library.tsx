@@ -30,6 +30,7 @@ import { errorMessage } from "@/lib/api";
 import { groupInstances, loaderLabel, sortInstances } from "@/lib/instances";
 import { cn, formatPlaytime, formatRelative } from "@/lib/utils";
 import { usePrefs, type LibraryGroupBy, type LibrarySort } from "@/stores/prefs";
+import { usePresenceView } from "@/lib/presence";
 
 const GROUP_BY: { value: LibraryGroupBy; label: string }[] = [
   { value: "group", label: "Group" },
@@ -209,6 +210,7 @@ function InstanceTable({ instances }: { instances: InstanceSummary[] }) {
 
 /** Every installed instance: search, group, sort, grid or list, right-click for everything else. */
 export function LibraryPage() {
+  usePresenceView({ view: "library" });
   const { data: instances, isLoading, error } = useInstances();
   const openNew = useNewInstance((s) => s.setOpen);
   const openModpack = useNewInstance((s) => s.openModpack);

@@ -7,6 +7,7 @@ import { BrandMark } from "@/components/brand-mark";
 import { Page, PageHeader, Section } from "@/components/page";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { usePresenceView } from "@/lib/presence";
 
 const REPO_URL = "https://github.com/Subhranil-Maity/Bananium";
 const AUTHOR_NAME = "Subhranil Maity";
@@ -24,6 +25,7 @@ function GitHubIcon() {
 }
 
 export function AboutPage() {
+  usePresenceView({ view: "about" });
   const { data: version } = useQuery({ queryKey: ["app-version"], queryFn: getVersion, staleTime: Infinity });
 
   return (

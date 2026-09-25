@@ -20,6 +20,7 @@ import { EmptyState, Page, PageHeader } from "@/components/page";
 import { useInstances } from "@/hooks/use-instances";
 import { errorMessage, run } from "@/lib/api";
 import { formatBytes } from "@/lib/utils";
+import { usePresenceView } from "@/lib/presence";
 
 const ALL = "__all__";
 
@@ -145,6 +146,8 @@ function Gallery({ instance, showInstance }: { instance: string | null; showInst
  * the backend scopes to the instances folder.
  */
 export function ScreenshotsPage({ instance: fixedInstance }: { instance?: string }) {
+  // Embedded in an instance page, that page reports itself instead.
+  usePresenceView(fixedInstance ? null : { view: "screenshots" });
   const { data: instances } = useInstances();
   const [filter, setFilter] = useState(ALL);
 

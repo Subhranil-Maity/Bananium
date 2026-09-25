@@ -1,17 +1,21 @@
 # Agent guide: Bananium
 
 This is the orientation document for any agent (or human) picking up this
-repo cold. Read this first; read `PLAN.md` second for the full milestone-by-
-milestone roadmap and design rationale. This file tells you *where things
-are and what to watch out for*; `PLAN.md` tells you *why the project is
-shaped this way and what's coming next*.
+repo cold. Read this first, then `CONTRIBUTING.md` for the frontend
+contract, setup, and the checks every change must pass. This file tells you
+*where things are and what to watch out for*.
+
+Milestone labels below (M0–M7) come from the original roadmap: M0 skeleton
+and frontend contract, M1 vanilla offline launch, M2 TUI v1, M3 instances,
+Java, and diagnostics, M4 Modrinth (with an offline mirror), M5 modpacks and
+the easy loaders, M6 the hard loaders and content managers, M7 packaging.
 
 ## What this is
 
 Bananium is a low-RAM, offline-first Minecraft launcher: a Rust core with a
 TUI as the primary interface and a CLI beside it, talking only to official
-Mojang endpoints, with local-only (offline-mode) accounts. See `PLAN.md`'s
-top section for the full pitch and RAM budgets.
+Mojang endpoints, with local-only (offline-mode) accounts. See `README.md`
+for the user-facing pitch.
 
 ## Current state (read this before assuming something is done)
 
@@ -22,7 +26,7 @@ them exist ahead of schedule, built on direct request rather than in
 milestone order — see the table below for exactly what each covers:
 
 - `bananium-tui` is a real (if intentionally minimal) ratatui app now, not
-  the `BOILER PLATE` stub PLAN.md's milestone order would suggest: an
+  the `BOILER PLATE` stub the milestone order would suggest: an
   instance list with running status, launch, quit, refresh, and an edit
   overlay (`e`) over `Command::InstanceSet` for a selected instance's RAM
   cap and extra JVM args. A launched instance's JVM stdout/stderr are
@@ -30,12 +34,12 @@ milestone order — see the table below for exactly what each covers:
   from the frontend) so the raw-mode/alternate-screen UI can't be corrupted
   by game log spam — see `Session::launch`'s doc comment in
   `bananium-api/src/session.rs`. The *live* log pane (tailing that file in
-  its own pane while the game runs), task tray, and command palette PLAN.md
-  describes for the rest of M2 don't exist yet.
+  its own pane while the game runs), task tray, and command palette planned
+  for the rest of M2 don't exist yet.
 - **`desktop/` is the graphical frontend**: a Tauri 2 app (crate
   `bananium-desktop` in `desktop/src-tauri`, React + TypeScript + Vite +
   shadcn/ui in `desktop/src`). It replaced the old egui GUI (deleted, along
-  with `bananium --gui`), built on direct request, ahead of any PLAN.md
+  with `bananium --gui`), built on direct request, ahead of any
   milestone. The Rust side is a thin bridge: one Tauri command,
   `dispatch(Command) -> CommandOutput`, and every `Event` re-emitted to the
   webview as `bananium://event`. Screens: Library (grid/list, group/sort),
@@ -49,7 +53,7 @@ milestone order — see the table below for exactly what each covers:
   TypeScript types in `desktop/src/bindings/` are **generated** from the
   Rust types by ts-rs (see "Building and verifying") — never hand-edit them.
   **Use bun, never npm**, for everything in `desktop/`.
-- Also built on direct request, ahead of PLAN.md's M3–M6 order, to back the
+- Also built on direct request, ahead of the M3–M6 order, to back the
   GUI (each is a `Command` any frontend can use):
   - **Fabric** (only loader supported): `bananium-meta/src/fabric.rs` merges
     Fabric's profile into vanilla's; `install --fabric <ver|latest>`.
@@ -84,6 +88,22 @@ milestone order — see the table below for exactly what each covers:
   `overrides/` + `client-overrides/`, the project icon, and `identify`.
   Forge/NeoForge/Quilt packs are refused. Verified for real with
   Fabulously Optimized (49 mods, dry-run launch OK).
+- **Discord Rich Presence** (`bananium-api/src/session/presence.rs`, on
+  top of `bananium-discord`): one Discord app, "Bananium"
+  (`DISCORD_APP_ID` in `bananium-api/src/presence.rs`). A pure
+  `compose(model, config)` picks the activity: running game > task in
+  progress > launcher page (reported by the webview via
+  `Command::PresenceSetView`). A background task retries reaching Discord
+  every 5s (`RETRY_INTERVAL_SECS`) for as long as it isn't connected —
+  status `Waiting` — and drops back into that loop if the connection is
+  lost, so closing and reopening Discord recovers by itself; updates are
+  diffed and spaced ≥5s (Discord's rate limit). Only the desktop app calls `Session::start_presence`; the CLI and
+  TUI don't. Settings live in `[discord]` (`DiscordConfig`); per-instance
+  `discord_hidden`. Images are `https://` URLs, not uploaded Discord
+  assets: our art is `assets/discord/*.png` served from GitHub raw (so it
+  must be pushed to `main`), copied into `desktop/public/discord/` for the
+  settings preview; modpack/project icons are Modrinth CDN URLs (a modpack
+  install now records `modrinth_project` + `modrinth_icon_url`).
 - `File*` commands (`bananium-api/src/session/files.rs`) are a file manager
   over an instance's game directory; `resolve_game_path` is the single gate
   that refuses anything escaping it.
@@ -100,7 +120,7 @@ milestone order — see the table below for exactly what each covers:
   the platform, a detected JVM of the exact major. System detection
   (`find_all_java`) now only feeds the pickers. The aarch64-Linux Adoptium
   fallback is **not** implemented.
-- No golden-file dry-run test matrix yet (PLAN.md calls this out as the
+- No golden-file dry-run test matrix yet (this would be the
   highest-value test in the project — it doesn't exist yet, only ad hoc
   manual verification has been done).
 - Verified for real on Linux x86_64 (vanilla) and Windows 11 x86_64
@@ -112,7 +132,7 @@ milestone order — see the table below for exactly what each covers:
   done.
 
 Don't assume a `Command` variant, CLI subcommand, or crate capability exists
-just because PLAN.md describes it for a later milestone — check the actual
+just because it's planned for a later milestone — check the actual
 code.
 
 ## Workspace layout
@@ -132,6 +152,7 @@ those over this table if they ever disagree.
 | `bananium-launch` | done for current needs | Classpath dedup, native extraction, argument templating, offline UUIDs + profile store, `LaunchPlan` |
 | `bananium-java` | Mojang runtimes + detection | Mojang java-runtime manifests and tree install (`runtime`); system JVM search (`find_all_java`) for pickers. No Adoptium fallback. |
 | `bananium-modrinth` | tested API client | v2 REST client used by `bananium-api`; no offline mirror |
+| `bananium-discord` | done for current needs | Async Discord IPC client (named pipe / Unix socket), `Activity` model clamped to Discord's limits, and the presence art URLs (`art`) |
 | `bananium-cli` | broad | clap frontend: install/launch/instance/profile/search/content/preset/java/screenshots |
 | `bananium-tui` | **first slice** | ratatui instance list + launch + RAM/JVM-args edit overlay; no live log pane/task tray/command palette yet |
 | `bananium-desktop` (`desktop/src-tauri`) | **the GUI** | Tauri 2 bridge for the React app in `desktop/src` |
@@ -210,8 +231,7 @@ a real JVM (`java -version` works) and a display (`$DISPLAY` is set), so a
 real (non-dry-run) launch is a legitimate way to verify changes to
 `bananium-launch`, not just a theoretical option.
 
-To test the offline gate (PLAN.md's "bring the interface down" manual
-check) without touching real networking, route requests to an address that
+To test the offline gate (the "bring the network down" manual check) without touching real networking, route requests to an address that
 refuses connections instantly:
 
 ```sh
@@ -359,7 +379,7 @@ for real and are worth knowing up front.
   the general house style already applied throughout `crates/`.
 - Don't add functionality beyond what's asked or what the current milestone
   needs — e.g. don't start on M3's Java provisioning or M2's TUI screens
-  unless that's the actual task. Check `PLAN.md`'s milestone list before
-  assuming something should exist yet.
+  unless that's the actual task. Check the milestone list at the top of
+  this file before assuming something should exist yet.
 - `rustfmt` defaults (no custom `rustfmt.toml`). Run `cargo fmt --all`
   before considering anything done.

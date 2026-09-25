@@ -45,6 +45,8 @@ impl Session {
                 jvm_args: cfg.jvm_args,
                 java_path: cfg.java_path,
                 running,
+                discord_hidden: cfg.discord_hidden,
+                modrinth_project: cfg.modrinth_project,
             });
         }
         Ok(CommandOutput::InstanceListed {
@@ -83,6 +85,22 @@ impl Session {
             cfg.group = (!group.is_empty()).then(|| group.to_string());
         }
         instances.save(instance, &cfg)?;
+        Ok(CommandOutput::InstanceUpdated {
+            instance: instance.to_string(),
+        })
+    }
+
+    /// `Command::InstanceSetDiscord`.
+    pub(super) fn instance_set_discord(
+        &self,
+        instance: &str,
+        hidden: bool,
+    ) -> Result<CommandOutput> {
+        let instances = self.instances();
+        let mut cfg = instances.load(instance)?;
+        cfg.discord_hidden = hidden;
+        instances.save(instance, &cfg)?;
+        self.presence.instance_changed(&instances, instance);
         Ok(CommandOutput::InstanceUpdated {
             instance: instance.to_string(),
         })
