@@ -65,7 +65,7 @@ function Rail() {
 
   return (
     <aside className="flex w-[68px] shrink-0 flex-col items-center gap-1.5 overflow-y-auto border-r border-sidebar-border bg-sidebar py-3">
-      <Link to="/" className="mb-3 flex size-11 items-center justify-center rounded-xl" aria-label="Library">
+      <Link to="/about" className="mb-3 flex size-11 items-center justify-center rounded-xl" aria-label="About Bananium">
         <BrandMark className="size-8" />
       </Link>
 

@@ -41,7 +41,7 @@ milestone order — see the table below for exactly what each covers:
   webview as `bananium://event`. Screens: Library (grid/list, group/sort),
   instance page (Content — mods/resource packs/shaders — Files, Logs,
   Screenshots, Settings), Browse (Modrinth), Presets, Screenshots (all
-  instances), Accounts, Settings. The webview's native right-click menu is
+  instances), Accounts, Settings, About (opened from the rail's banana logo). The webview's native right-click menu is
   replaced app-wide by `GlobalContextMenu`; component menus (Radix
   `ContextMenu`) `preventDefault` first and take precedence.
   Rail/tooltip gotcha: never give a Radix `asChild` child (e.g. `NavLink`)

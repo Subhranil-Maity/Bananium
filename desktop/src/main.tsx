@@ -14,6 +14,7 @@ import { LibraryPage } from "@/routes/library";
 import { PresetsPage } from "@/routes/presets";
 import { ScreenshotsPage } from "@/routes/screenshots";
 import { SettingsPage } from "@/routes/settings";
+import { AboutPage } from "@/routes/about";
 import { INSTANCES_KEY } from "@/hooks/use-instances";
 import { onEvent } from "@/lib/api";
 import { useTasks } from "@/stores/tasks";
@@ -53,6 +54,7 @@ const router = createHashRouter([
       { path: "presets", element: <PresetsPage /> },
       { path: "screenshots", element: <ScreenshotsPage /> },
       { path: "accounts", element: <AccountsPage /> },
+      { path: "about", element: <AboutPage /> },
       { path: "settings", element: <SettingsPage /> },
     ],
   },
