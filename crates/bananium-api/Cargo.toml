@@ -12,11 +12,21 @@ bananium-store = { path = "../bananium-store" }
 bananium-instance = { path = "../bananium-instance" }
 bananium-launch = { path = "../bananium-launch" }
 bananium-java = { path = "../bananium-java" }
+bananium-modrinth = { path = "../bananium-modrinth" }
 serde = { version = "1", features = ["derive"] }
 thiserror = "2"
-tokio = { version = "1", features = ["sync", "rt", "process"] }
+tokio = { version = "1", features = ["sync", "rt", "process", "macros"] }
 tracing = "0.1"
+ts-rs = { version = "12.0.1", optional = true }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 tempfile = "3"
+serde_json = "1"
+
+[features]
+# Derive TypeScript bindings for `Command`/`CommandOutput`/`Event` and their
+# DTOs so the Tauri webview's types can't drift from the Rust ones.
+# Regenerate with `cargo test -p bananium-api --features ts export_bindings`;
+# output lands in `desktop/src/bindings/` (see `.cargo/config.toml`).
+ts = ["dep:ts-rs", "bananium-core/ts", "bananium-instance/ts"]

@@ -23,6 +23,14 @@ impl MetaClient {
         Self { http, paths }
     }
 
+    pub(crate) fn http(&self) -> &HttpClient {
+        &self.http
+    }
+
+    pub(crate) fn paths(&self) -> &Paths {
+        &self.paths
+    }
+
     /// Fetch (or, offline, load the cached) version manifest.
     pub async fn version_manifest(&self) -> Result<VersionManifest> {
         let cache_path = self.paths.meta_dir().join("version_manifest_v2.json");
@@ -68,7 +76,7 @@ impl MetaClient {
     /// path. This ordering — network first, cache as fallback rather than
     /// cache-first — is what the offline gate actually depends on: it must
     /// degrade gracefully, not silently prefer stale data while connected.
-    async fn fetch_cached<T: DeserializeOwned>(
+    pub(crate) async fn fetch_cached<T: DeserializeOwned>(
         &self,
         what: &'static str,
         url: &str,

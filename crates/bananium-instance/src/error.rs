@@ -22,6 +22,24 @@ pub enum Error {
 
     #[error("an instance named {0:?} already exists for a different Minecraft version")]
     NameInUse(String),
+
+    #[error("an instance named {0:?} already exists")]
+    AlreadyExists(String),
+
+    #[error("instance {0:?} is running; stop it first")]
+    Running(String),
+
+    #[error("no installed content named {0:?}")]
+    ContentNotFound(String),
+
+    #[error("no preset named {0:?}")]
+    PresetNotFound(String),
+
+    #[error("a preset named {0:?} already exists")]
+    PresetExists(String),
+
+    #[error("invalid preset name {0:?}: use 1-64 characters, no slashes")]
+    InvalidPresetName(String),
 }
 
 pub type Result<T> = std::result::Result<T, Error>;

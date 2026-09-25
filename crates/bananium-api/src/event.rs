@@ -4,7 +4,12 @@ use serde::{Deserialize, Serialize};
 /// long-running task reports `Progress` under a stable `task_id`, so every
 /// frontend renders progress/cancellation/failure identically without
 /// inventing its own scheme.
+///
+/// Byte counts are `u64` in Rust but typed as `number` in the generated
+/// TypeScript: serde_json emits them as plain JSON numbers, not `bigint`,
+/// and no real download approaches 2^53 bytes.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 #[serde(tag = "event", rename_all = "snake_case")]
 pub enum Event {
     Log {
@@ -18,10 +23,16 @@ pub enum Event {
     /// identifies exactly what this file is (e.g. a maven coordinate or
     /// asset path), not just its category, so a frontend can show the user
     /// what's actually being fetched right now.
+    ///
+    /// `task_id` is `"<parent task id>/<file key>"`: everything before the
+    /// first `/` is the task the file belongs to (the one its
+    /// `OverallProgress`/`TaskCompleted` events use).
     Progress {
         task_id: String,
         label: String,
+        #[cfg_attr(feature = "ts", ts(type = "number"))]
         bytes_done: u64,
+        #[cfg_attr(feature = "ts", ts(type = "number | null"))]
         bytes_total: Option<u64>,
         bytes_per_sec: f64,
     },
@@ -32,15 +43,25 @@ pub enum Event {
     /// should render as "the" progress bar for a command like `install`;
     /// per-file `Progress` events are there for a frontend that also wants
     /// a detailed per-file view.
+    ///
+    /// Throttled to about ten per second per task, and the last one before
+    /// `TaskCompleted` is always exact — see `Session::download_tracked`.
     OverallProgress {
         task_id: String,
         label: String,
+        /// What's being fetched right now (e.g. a maven coordinate or asset
+        /// path), when downloading.
+        current_file: Option<String>,
+        #[cfg_attr(feature = "ts", ts(type = "number"))]
         bytes_done: u64,
+        #[cfg_attr(feature = "ts", ts(type = "number | null"))]
         bytes_total: Option<u64>,
         /// Average bytes/sec since the job started (total bytes done over
         /// total elapsed time, not an instantaneous rate).
         bytes_per_sec: f64,
+        #[cfg_attr(feature = "ts", ts(type = "number"))]
         files_done: usize,
+        #[cfg_attr(feature = "ts", ts(type = "number"))]
         files_total: usize,
     },
     TaskCompleted {
@@ -49,6 +70,13 @@ pub enum Event {
     TaskFailed {
         task_id: String,
         error: String,
+    },
+    /// A game this session launched has exited (on its own or via
+    /// `Command::InstanceKill`). `exit_code` is `None` when the process was
+    /// killed by a signal.
+    InstanceExited {
+        instance: String,
+        exit_code: Option<i32>,
     },
 }
 

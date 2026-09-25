@@ -2,10 +2,10 @@
 //! (clap) — a CI check enforces that (see PLAN.md's frontend contract).
 
 use std::io::{IsTerminal, Write};
-use std::time::{Duration, Instant};
 
 use bananium_api::{
-    is_valid_instance_name, Command, CommandOutput, Config, ConfigOverrides, Event, Paths, Session,
+    is_valid_instance_name, Command, CommandOutput, Config, ConfigOverrides, ContentKind, Event,
+    Paths, Session,
 };
 use clap::{Parser, Subcommand};
 use tokio::sync::broadcast;
@@ -17,14 +17,8 @@ struct Cli {
     #[arg(long, global = true)]
     format_json: bool,
 
-    /// Launch the graphical (egui) interface instead of running a
-    /// subcommand. Takes over the whole process — no subcommand may be
-    /// given alongside it.
-    #[arg(long, global = true)]
-    gui: bool,
-
     #[command(subcommand)]
-    command: Option<Cmd>,
+    command: Cmd,
 }
 
 #[derive(Subcommand)]
@@ -44,6 +38,16 @@ enum Cmd {
         /// a blank answer defaulting to a random name.
         #[arg(long)]
         name: Option<String>,
+        /// Also install the Fabric mod loader: a loader version, or
+        /// "latest" for the newest stable one.
+        #[arg(long)]
+        fabric: Option<String>,
+    },
+    /// List installable Minecraft versions.
+    Versions {
+        /// Include snapshots, betas, and alphas.
+        #[arg(long)]
+        all: bool,
     },
     /// Launch an installed instance.
     Launch {
@@ -61,6 +65,90 @@ enum Cmd {
         #[command(subcommand)]
         action: InstanceAction,
     },
+    /// Search Modrinth.
+    Search {
+        query: String,
+        /// mod, resource_pack, or shader.
+        #[arg(long, default_value = "mod", value_parser = parse_kind)]
+        kind: ContentKind,
+        /// Only show results this instance can use.
+        #[arg(long)]
+        instance: Option<String>,
+    },
+    /// Manage an instance's mods, resource packs, and shader packs.
+    Content {
+        #[command(subcommand)]
+        action: ContentAction,
+    },
+    /// Save and apply content presets.
+    Preset {
+        #[command(subcommand)]
+        action: PresetAction,
+    },
+    /// List every JVM detected on this machine.
+    Java,
+    /// List screenshots from every instance.
+    Screenshots,
+    /// Manage offline profiles (the usernames you can play as).
+    Profile {
+        #[command(subcommand)]
+        action: ProfileAction,
+    },
+}
+
+#[derive(Subcommand)]
+enum ContentAction {
+    /// List everything installed.
+    Ls { instance: String },
+    /// Install a Modrinth project (id or slug) and its required dependencies.
+    Add {
+        instance: String,
+        project: String,
+        #[arg(long, default_value = "mod", value_parser = parse_kind)]
+        kind: ContentKind,
+    },
+    /// Remove an installed file.
+    Rm {
+        instance: String,
+        filename: String,
+        #[arg(long, default_value = "mod", value_parser = parse_kind)]
+        kind: ContentKind,
+    },
+    /// Show available updates.
+    Updates { instance: String },
+}
+
+fn parse_kind(s: &str) -> Result<ContentKind, String> {
+    match s {
+        "mod" => Ok(ContentKind::Mod),
+        "resource_pack" | "resourcepack" => Ok(ContentKind::ResourcePack),
+        "shader" => Ok(ContentKind::Shader),
+        _ => Err("expected mod, resource_pack, or shader".into()),
+    }
+}
+
+#[derive(Subcommand)]
+enum PresetAction {
+    /// List presets.
+    Ls,
+    /// Save an instance's Modrinth content as a preset.
+    Save { instance: String, name: String },
+    /// Install a preset's content into an instance.
+    Apply { preset: String, instance: String },
+    /// Delete a preset.
+    Rm { name: String },
+}
+
+#[derive(Subcommand)]
+enum ProfileAction {
+    /// List saved profiles; `*` marks the default.
+    Ls,
+    /// Add a profile (3-16 letters, digits, or '_').
+    Add { name: String },
+    /// Remove a profile.
+    Rm { name: String },
+    /// Make a profile the default for launches without `--profile`.
+    Default { name: String },
 }
 
 #[derive(Subcommand)]
@@ -89,6 +177,12 @@ enum InstanceAction {
         #[arg(long)]
         clear_java_args: bool,
     },
+    /// Delete an instance and everything in it (worlds included).
+    Rm { instance: String },
+    /// Rename an instance.
+    Rename { instance: String, new_name: String },
+    /// Copy an instance, worlds and mods included, under a new name.
+    Clone { instance: String, new_name: String },
 }
 
 #[derive(Subcommand)]
@@ -97,57 +191,11 @@ enum ConfigAction {
     Show,
 }
 
-/// Plain (non-`#[tokio::main]`) entry point: `--gui` must own the main
-/// thread for `eframe`/`winit`'s native event loop, which can't run inside
-/// an already-started Tokio runtime the way the rest of this binary's
-/// subcommands need one. So the runtime is only ever built on the branch
-/// that actually needs it — `run_cli` — never up front in `main` itself.
-fn main() -> std::process::ExitCode {
+#[tokio::main]
+async fn main() -> std::process::ExitCode {
     bananium_api::init_logging();
     let cli = Cli::parse();
-
-    if cli.gui {
-        if cli.command.is_some() {
-            eprintln!("error: --gui cannot be combined with a subcommand");
-            return std::process::ExitCode::FAILURE;
-        }
-        return run_gui();
-    }
-
-    let Some(command) = cli.command else {
-        use clap::CommandFactory;
-        let _ = Cli::command().print_help();
-        println!();
-        return std::process::ExitCode::FAILURE;
-    };
-
-    let runtime = match tokio::runtime::Runtime::new() {
-        Ok(rt) => rt,
-        Err(err) => {
-            eprintln!("error: failed to start async runtime: {err}");
-            return std::process::ExitCode::FAILURE;
-        }
-    };
-    runtime.block_on(run_cli(command, cli.format_json))
-}
-
-/// `--gui`: hand the already-built `Session` straight to `bananium-egui`,
-/// blocking this thread (the window's event loop) until the window closes.
-fn run_gui() -> std::process::ExitCode {
-    let session = match build_session() {
-        Ok(s) => s,
-        Err(err) => {
-            eprintln!("error: {err}");
-            return std::process::ExitCode::FAILURE;
-        }
-    };
-    match bananium_egui::run(session) {
-        Ok(()) => std::process::ExitCode::SUCCESS,
-        Err(err) => {
-            eprintln!("error: {err}");
-            std::process::ExitCode::FAILURE
-        }
-    }
+    run_cli(cli.command, cli.format_json).await
 }
 
 async fn run_cli(command: Cmd, format_json: bool) -> std::process::ExitCode {
@@ -163,10 +211,21 @@ async fn run_cli(command: Cmd, format_json: bool) -> std::process::ExitCode {
         Cmd::Config {
             action: ConfigAction::Show,
         } => Command::ConfigShow,
-        Cmd::Install { version, name } => {
+        Cmd::Install {
+            version,
+            name,
+            fabric,
+        } => {
             let name = name.or_else(prompt_instance_name);
-            Command::Install { version, name }
+            Command::Install {
+                version,
+                name,
+                fabric_loader: fabric,
+            }
         }
+        Cmd::Versions { all } => Command::VersionList {
+            include_snapshots: all,
+        },
         Cmd::Launch {
             instance,
             profile,
@@ -193,7 +252,69 @@ async fn run_cli(command: Cmd, format_json: bool) -> std::process::ExitCode {
                 } else {
                     Some(java_arg)
                 },
+                java_path: None,
             },
+            InstanceAction::Rm { instance } => Command::InstanceRemove { instance },
+            InstanceAction::Rename { instance, new_name } => {
+                Command::InstanceRename { instance, new_name }
+            }
+            InstanceAction::Clone { instance, new_name } => {
+                Command::InstanceClone { instance, new_name }
+            }
+        },
+        Cmd::Search {
+            query,
+            kind,
+            instance,
+        } => Command::ModrinthSearch {
+            query,
+            kind,
+            instance,
+            categories: Vec::new(),
+            sort: Default::default(),
+            offset: 0,
+            limit: 20,
+        },
+        Cmd::Content { action } => match action {
+            ContentAction::Ls { instance } => Command::ContentList { instance },
+            ContentAction::Add {
+                instance,
+                project,
+                kind,
+            } => Command::ContentInstall {
+                instance,
+                kind,
+                project,
+                version: None,
+            },
+            ContentAction::Rm {
+                instance,
+                filename,
+                kind,
+            } => Command::ContentRemove {
+                instance,
+                kind,
+                filename,
+            },
+            ContentAction::Updates { instance } => Command::ContentCheckUpdates { instance },
+        },
+        Cmd::Preset { action } => match action {
+            PresetAction::Ls => Command::PresetList,
+            PresetAction::Save { instance, name } => Command::PresetSave {
+                instance,
+                name,
+                kinds: Vec::new(),
+            },
+            PresetAction::Apply { preset, instance } => Command::PresetApply { preset, instance },
+            PresetAction::Rm { name } => Command::PresetDelete { name },
+        },
+        Cmd::Java => Command::JavaList,
+        Cmd::Screenshots => Command::ScreenshotList { instance: None },
+        Cmd::Profile { action } => match action {
+            ProfileAction::Ls => Command::ProfileList,
+            ProfileAction::Add { name } => Command::ProfileAdd { name },
+            ProfileAction::Rm { name } => Command::ProfileRemove { name },
+            ProfileAction::Default { name } => Command::ProfileSetDefault { name },
         },
     };
 
@@ -255,15 +376,12 @@ async fn run_with_progress(
     }
 }
 
-/// Stderr progress renderer for a `run_with_progress` event stream. Per-file
-/// `Progress` events are tracked only to show which file is currently in
-/// flight; the numbers that matter for a "is this stuck" read — total
-/// downloaded, total size, speed — come from the aggregate
-/// `OverallProgress` events `Session` computes for the whole job.
+/// Stderr progress renderer for a `run_with_progress` event stream, driven
+/// by the aggregate `OverallProgress` events `Session` computes for the
+/// whole job (total downloaded, total size, speed, current file).
 #[derive(Default)]
 struct ProgressPrinter {
     current_file: String,
-    last_rendered: Option<Instant>,
     rendered_anything: bool,
 }
 
@@ -274,6 +392,8 @@ impl ProgressPrinter {
                 self.current_file = label;
             }
             Event::OverallProgress {
+                label,
+                current_file,
                 bytes_done,
                 bytes_total,
                 bytes_per_sec,
@@ -281,24 +401,21 @@ impl ProgressPrinter {
                 files_total,
                 ..
             } => {
-                // Throttle rendering, not the underlying events — a
-                // multi-file install can emit hundreds of these a second,
-                // far faster than a terminal line is worth repainting.
-                // Always render the final (100%) update so the line ends
-                // on a completed, not stale, state.
-                let is_done = bytes_total.is_some_and(|t| bytes_done >= t);
-                let due = self
-                    .last_rendered
-                    .is_none_or(|t| t.elapsed() >= Duration::from_millis(150));
-                if !is_done && !due {
+                // `Session` already throttles these to ~10/s and always
+                // sends an exact final one, so every event is rendered.
+                self.rendered_anything = true;
+                if let Some(file) = current_file {
+                    self.current_file = file;
+                }
+                if bytes_done == 0 && bytes_total.is_none() {
+                    // A non-download phase: just a step count.
+                    eprint!("\r\x1b[K{label} {files_done}/{files_total}");
+                    let _ = std::io::stderr().flush();
                     return;
                 }
-                self.last_rendered = Some(Instant::now());
-                self.rendered_anything = true;
-
                 let pct = bytes_total
                     .filter(|&t| t > 0)
-                    .map(|t| bytes_done as f64 / t as f64 * 100.0)
+                    .map(|t| (bytes_done as f64 / t as f64 * 100.0).min(100.0))
                     .unwrap_or(0.0);
                 let total = bytes_total
                     .map(format_bytes)
@@ -327,6 +444,9 @@ impl ProgressPrinter {
             Event::Log { level, message } => {
                 eprintln!("[{level}] {message}");
             }
+            // The CLI exits right after `launch` returns, long before any
+            // game does, so it never observes this.
+            Event::InstanceExited { .. } => {}
         }
     }
 }
@@ -456,6 +576,174 @@ fn print_output(output: &CommandOutput, as_json: bool) {
         }
         CommandOutput::InstanceUpdated { instance } => {
             println!("updated instance {instance:?}");
+        }
+        CommandOutput::ModrinthSearched {
+            hits, total_hits, ..
+        } => {
+            for h in hits {
+                let mark = if h.installed { "*" } else { " " };
+                println!(
+                    "{mark} {:<28} {:<10} {}",
+                    h.slug.as_deref().unwrap_or(&h.project_id),
+                    h.downloads,
+                    h.title
+                );
+            }
+            println!("({total_hits} total)");
+        }
+        CommandOutput::ModrinthProjectShown { project } => {
+            println!("{} — {}", project.title, project.description);
+        }
+        CommandOutput::ModrinthVersionsListed { versions } => {
+            for v in versions {
+                println!("{:<24} {:<8} {}", v.version_number, v.version_type, v.id);
+            }
+        }
+        CommandOutput::ContentListed { entries, .. } => {
+            if entries.is_empty() {
+                println!("nothing installed");
+            }
+            for e in entries {
+                let state = if e.enabled { " " } else { "x" };
+                println!(
+                    "{state} {:<14} {:<32} {}",
+                    format!("{:?}", e.kind),
+                    e.title,
+                    e.version_number.as_deref().unwrap_or("local")
+                );
+            }
+        }
+        CommandOutput::ContentInstalled { installed, .. } => {
+            for e in installed {
+                let dep = if e.dependency { " (dependency)" } else { "" };
+                println!(
+                    "installed {} {}{dep}",
+                    e.title,
+                    e.version_number.as_deref().unwrap_or_default()
+                );
+            }
+        }
+        CommandOutput::ContentRemoved { filename, .. } => println!("removed {filename}"),
+        CommandOutput::ContentToggled {
+            filename, enabled, ..
+        } => {
+            let state = if *enabled { "enabled" } else { "disabled" };
+            println!("{state} {filename}");
+        }
+        CommandOutput::ContentImported { entry, .. } => println!("imported {}", entry.title),
+        CommandOutput::ContentIdentified { identified, .. } => {
+            println!("identified {identified} file(s)");
+        }
+        CommandOutput::ContentUpdatesFound { updates, .. } => {
+            if updates.is_empty() {
+                println!("everything is up to date");
+            }
+            for u in updates {
+                println!(
+                    "{:<32} {} -> {}",
+                    u.title,
+                    u.current_version.as_deref().unwrap_or("?"),
+                    u.new_version_number
+                );
+            }
+        }
+        CommandOutput::JavaListed { installs } => {
+            for j in installs {
+                println!("java {:<4} {}", j.major_version, j.path.display());
+            }
+        }
+        CommandOutput::ScreenshotListed { screenshots } => {
+            for s in screenshots {
+                println!("{:<20} {}", s.instance, s.path.display());
+            }
+        }
+        CommandOutput::ScreenshotDeleted { path } => println!("deleted {}", path.display()),
+        CommandOutput::PresetListed { presets } => {
+            for p in presets {
+                println!(
+                    "{:<24} {} {:?}, {} item(s)",
+                    p.name,
+                    p.mc_version,
+                    p.loader,
+                    p.entries.len()
+                );
+            }
+        }
+        CommandOutput::PresetSaved {
+            preset,
+            skipped_local,
+        } => {
+            println!(
+                "saved preset {:?} with {} item(s)",
+                preset.name,
+                preset.entries.len()
+            );
+            if *skipped_local > 0 {
+                println!("({skipped_local} local file(s) not included)");
+            }
+        }
+        CommandOutput::PresetApplied {
+            applied, skipped, ..
+        } => {
+            for e in applied {
+                println!("installed {}", e.title);
+            }
+            for s in skipped {
+                println!("skipped {}: {}", s.title, s.reason);
+            }
+        }
+        CommandOutput::PresetDeleted { name } => println!("deleted preset {name:?}"),
+        CommandOutput::PresetRenamed { name } => println!("renamed preset to {name:?}"),
+        CommandOutput::PresetExported { path } => println!("exported to {}", path.display()),
+        CommandOutput::PresetImported { preset } => println!("imported preset {:?}", preset.name),
+        CommandOutput::VersionListed { versions, .. } => {
+            for v in versions {
+                println!("{:<24} {}", v.id, v.kind);
+            }
+        }
+        CommandOutput::FabricLoaderListed { loaders, .. } => {
+            for l in loaders {
+                let stable = if l.stable { "stable" } else { "" };
+                println!("{:<16} {stable}", l.version);
+            }
+        }
+        CommandOutput::InstanceRemoved { instance } => {
+            println!("removed instance {instance:?}");
+        }
+        CommandOutput::InstanceRenamed { old, instance } => {
+            println!("renamed instance {old:?} to {instance:?}");
+        }
+        CommandOutput::InstanceCloned { source, instance } => {
+            println!("cloned instance {source:?} as {instance:?}");
+        }
+        CommandOutput::InstanceKilled { instance } => {
+            println!("stopped instance {instance:?}");
+        }
+        CommandOutput::LogListed { logs, .. } => {
+            for log in logs {
+                println!("{:<32} {:>10}", log.name, format_bytes(log.size));
+            }
+        }
+        CommandOutput::LogChunk { text, .. } => {
+            print!("{text}");
+        }
+        CommandOutput::ProfileListed { profiles } => {
+            if profiles.is_empty() {
+                println!("no profiles yet (\"Player\" is created on first launch)");
+            }
+            for p in profiles {
+                let marker = if p.is_default { "*" } else { " " };
+                println!("{marker} {:<16} {}", p.name, p.uuid);
+            }
+        }
+        CommandOutput::ProfileAdded { profile } => {
+            println!("added profile {:?} ({})", profile.name, profile.uuid);
+        }
+        CommandOutput::ProfileRemoved { name } => {
+            println!("removed profile {name:?}");
+        }
+        CommandOutput::ProfileDefaultSet { name } => {
+            println!("default profile is now {name:?}");
         }
     }
 }

@@ -190,6 +190,26 @@ impl Paths {
         self.home.join("cache").join("natives").join(key_hex)
     }
 
+    /// User-saved content presets, one TOML file each.
+    pub fn presets_dir(&self) -> PathBuf {
+        self.home.join("presets")
+    }
+
+    /// A `.jar`-named view (reflink/hardlink) of the store blob `sha1`, for
+    /// the launch classpath. Store blobs are extensionless, and Fabric's
+    /// remapper (tiny-remapper) silently skips classpath inputs that don't
+    /// end in `.jar` — it then fails with "Generated deobfuscated JARs
+    /// contain no classes". Vanilla doesn't care, but every entry gets the
+    /// same treatment so there's one classpath shape to reason about.
+    pub fn jar_link(&self, sha1_hex: &str) -> PathBuf {
+        let prefix = &sha1_hex[..2.min(sha1_hex.len())];
+        self.home
+            .join("cache")
+            .join("jars")
+            .join(prefix)
+            .join(format!("{sha1_hex}.jar"))
+    }
+
     /// Create every top-level directory Bananium expects to find on startup.
     pub fn ensure_dirs(&self) -> Result<()> {
         for dir in [

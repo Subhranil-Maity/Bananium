@@ -16,6 +16,8 @@ pub enum Error {
     #[error(transparent)]
     Launch(Box<bananium_launch::Error>),
     #[error(transparent)]
+    Modrinth(Box<bananium_modrinth::Error>),
+    #[error(transparent)]
     Java(#[from] bananium_java::Error),
     #[error("io error: {0}")]
     Io(#[from] std::io::Error),
@@ -23,6 +25,36 @@ pub enum Error {
     DownloadsFailed(usize, usize, String),
     #[error("instance {0:?} is already running; only one instance of it can run at a time")]
     InstanceAlreadyRunning(String),
+    #[error("instance {0:?} wasn't launched from this window, so it can't be stopped from here")]
+    NotLaunchedHere(String),
+    #[error("no log file named {0:?}")]
+    LogNotFound(String),
+    #[error(
+        "this Fabric instance has no loader version recorded; reinstall it with a loader version"
+    )]
+    MissingLoaderVersion,
+    #[error("instance {0:?} is vanilla; mods and shaders need a Fabric instance")]
+    NeedsFabric(String),
+    #[error("{project} has no version for Minecraft {mc_version} that this instance can use")]
+    NoCompatibleVersion { project: String, mc_version: String },
+    #[error("no version with id {0:?}")]
+    VersionNotFound(String),
+    #[error("Modrinth version {0:?} has no downloadable file")]
+    NoFile(String),
+    #[error("{0:?} isn't a supported file for this kind of content")]
+    UnsupportedFile(String),
+    #[error("dependency resolution stopped after {0} projects")]
+    TooManyDependencies(usize),
+    #[error("project {0:?} isn't installed in this instance")]
+    NotInstalled(String),
+    #[error(
+        "{project} has only beta/alpha versions for Minecraft {mc_version}; pick one explicitly from its version list to install it"
+    )]
+    OnlyPrereleases { project: String, mc_version: String },
+    #[error("can't install: {0}")]
+    Incompatible(String),
+    #[error("{0:?} isn't a screenshot")]
+    NotAScreenshot(String),
 }
 
 /// Generates a `From<$source> for Error` that boxes on the way in. Written
@@ -46,5 +78,6 @@ impl_boxed_from!(bananium_meta::Error, Meta);
 impl_boxed_from!(bananium_store::Error, Store);
 impl_boxed_from!(bananium_instance::Error, Instance);
 impl_boxed_from!(bananium_launch::Error, Launch);
+impl_boxed_from!(bananium_modrinth::Error, Modrinth);
 
 pub type Result<T> = std::result::Result<T, Error>;

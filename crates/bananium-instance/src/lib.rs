@@ -4,7 +4,9 @@
 //! version pin and a game directory. `instance new|clone|rm|...`, groups,
 //! and the mod lockfile arrive in M3/M4.
 
+pub mod content;
 pub mod error;
+pub mod presets;
 
 use std::path::PathBuf;
 
@@ -12,15 +14,19 @@ use bananium_core::Paths;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+pub use content::{ContentEntry, ContentKind, ContentStore};
 pub use error::{Error, Result};
+pub use presets::{Preset, PresetEntry, PresetStore};
 
-/// Which mod loader an instance uses. Only `Vanilla` exists until Fabric/Quilt
-/// (M5) and Forge/NeoForge (M6) land.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+/// Which mod loader an instance uses. Quilt and Forge/NeoForge aren't
+/// supported (see PLAN.md M5/M6).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Loader {
     #[default]
     Vanilla,
+    /// Fabric; the loader release is [`InstanceConfig::loader_version`].
+    Fabric,
 }
 
 /// The contents of an instance's `instance.toml`: enough to know what
@@ -32,6 +38,11 @@ pub struct InstanceConfig {
     pub mc_version: String,
     #[serde(default)]
     pub loader: Loader,
+    /// The pinned loader release (e.g. Fabric `0.16.9`); `None` for
+    /// vanilla. A flat field rather than data on [`Loader::Fabric`] so that
+    /// `loader = "vanilla"` in existing `instance.toml` files still parses.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub loader_version: Option<String>,
     /// Per-instance Java override; falls back to `Config::java_path`, then
     /// auto-detection, when absent.
     #[serde(default)]
@@ -120,6 +131,7 @@ impl InstanceStore {
             name: display_name,
             mc_version: mc_version.to_string(),
             loader: Loader::Vanilla,
+            loader_version: None,
             java_path: None,
             ram_mb: None,
             jvm_args: Vec::new(),
@@ -233,11 +245,116 @@ impl InstanceStore {
     pub fn mark_running(&self, slug: &str, pid: u32) -> Result<()> {
         let mut pids = self.running_pids(slug)?;
         pids.push(pid);
+        self.write_running(slug, pids)
+    }
+
+    /// Forget `pid` for `slug` once its process is known to have exited.
+    /// Called by a long-lived frontend (one `Session` that outlives the
+    /// game) so the running state is exact immediately, rather than waiting
+    /// for the lazy sweep in [`InstanceStore::running_pids`] — which also
+    /// guards against the OS reusing the pid for an unrelated process.
+    pub fn mark_exited(&self, slug: &str, pid: u32) -> Result<()> {
+        if !self.paths.instance_dir(slug).is_dir() {
+            // Deleted (or renamed) while running; nothing left to update.
+            return Ok(());
+        }
+        let pids = self
+            .running_pids(slug)?
+            .into_iter()
+            .filter(|&p| p != pid)
+            .collect();
+        self.write_running(slug, pids)
+    }
+
+    fn write_running(&self, slug: &str, pids: Vec<u32>) -> Result<()> {
         let path = self.paths.instance_running_toml(slug);
         std::fs::create_dir_all(self.paths.instance_dir(slug))?;
         std::fs::write(&path, toml::to_string_pretty(&RunningState { pids })?)?;
         Ok(())
     }
+
+    /// Delete an instance and everything in it (worlds, mods, logs).
+    /// Refused while it's running, so a live game never has its directory
+    /// pulled out from under it.
+    pub fn remove(&self, slug: &str) -> Result<()> {
+        self.resolve(Some(slug))?;
+        if self.is_running(slug)? {
+            return Err(Error::Running(slug.to_string()));
+        }
+        std::fs::remove_dir_all(self.paths.instance_dir(slug))?;
+        Ok(())
+    }
+
+    /// Rename an instance: its display name and its directory/slug both
+    /// change. Returns the new slug. Refused while running (the game's
+    /// working directory would move) or if `new_name` is taken.
+    pub fn rename(&self, slug: &str, new_name: &str) -> Result<String> {
+        let mut cfg = self.load(slug)?;
+        if !is_valid_name(new_name) {
+            return Err(Error::InvalidName(new_name.to_string()));
+        }
+        if self.is_running(slug)? {
+            return Err(Error::Running(slug.to_string()));
+        }
+        let new_slug = Self::slugify(new_name);
+        if new_slug != slug && self.paths.instance_dir(&new_slug).exists() {
+            return Err(Error::AlreadyExists(new_name.to_string()));
+        }
+        if new_slug != slug {
+            std::fs::rename(
+                self.paths.instance_dir(slug),
+                self.paths.instance_dir(&new_slug),
+            )?;
+        }
+        cfg.name = new_name.to_string();
+        self.save(&new_slug, &cfg)?;
+        Ok(new_slug)
+    }
+
+    /// Copy an instance (config, worlds, mods, resource packs — the whole
+    /// game directory) under a new name. Launch logs and running state are
+    /// deliberately not copied: they describe the source's history, not
+    /// the copy's. Returns the new slug.
+    pub fn clone_instance(&self, slug: &str, new_name: &str) -> Result<String> {
+        let mut cfg = self.load(slug)?;
+        if !is_valid_name(new_name) {
+            return Err(Error::InvalidName(new_name.to_string()));
+        }
+        let new_slug = Self::slugify(new_name);
+        if self.paths.instance_dir(&new_slug).exists() {
+            return Err(Error::AlreadyExists(new_name.to_string()));
+        }
+        copy_dir_recursive(
+            &self.paths.instance_minecraft_dir(slug),
+            &self.paths.instance_minecraft_dir(&new_slug),
+        )?;
+        let lock = self.paths.instance_lock(slug);
+        if lock.is_file() {
+            std::fs::copy(&lock, self.paths.instance_lock(&new_slug))?;
+        }
+        cfg.name = new_name.to_string();
+        self.save(&new_slug, &cfg)?;
+        Ok(new_slug)
+    }
+}
+
+/// Recursively copy `from` into `to` (created if missing). A missing
+/// `from` copies nothing — a never-launched instance may not have one yet.
+fn copy_dir_recursive(from: &std::path::Path, to: &std::path::Path) -> Result<()> {
+    std::fs::create_dir_all(to)?;
+    if !from.is_dir() {
+        return Ok(());
+    }
+    for entry in std::fs::read_dir(from)? {
+        let entry = entry?;
+        let dest = to.join(entry.file_name());
+        if entry.file_type()?.is_dir() {
+            copy_dir_recursive(&entry.path(), &dest)?;
+        } else {
+            std::fs::copy(entry.path(), &dest)?;
+        }
+    }
+    Ok(())
 }
 
 /// On-disk shape of `running.toml` — see [`InstanceStore::running_pids`].
@@ -247,17 +364,41 @@ struct RunningState {
     pids: Vec<u32>,
 }
 
-/// Whether `pid` currently identifies a live process. Checks `/proc/<pid>`,
-/// which only exists on Linux — matching this project's "only verified on
-/// Linux x86_64" scope per AGENTS.md. On any other target this
-/// conservatively reports `false` rather than guessing, which just disables
-/// the one-instance-online-at-a-time guard there instead of misbehaving.
+/// Whether `pid` currently identifies a live process. Linux checks
+/// `/proc/<pid>`; Windows opens the process and asks whether it has an exit
+/// code yet. On any other target this conservatively reports `false`
+/// rather than guessing, which just disables the one-instance-online-at-a-
+/// time guard there instead of misbehaving.
 #[cfg(target_os = "linux")]
 fn is_pid_alive(pid: u32) -> bool {
     std::path::Path::new(&format!("/proc/{pid}")).exists()
 }
 
-#[cfg(not(target_os = "linux"))]
+#[cfg(windows)]
+fn is_pid_alive(pid: u32) -> bool {
+    use windows_sys::Win32::Foundation::{CloseHandle, STILL_ACTIVE};
+    use windows_sys::Win32::System::Threading::{
+        GetExitCodeProcess, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
+    };
+
+    // SAFETY: plain Win32 calls on a handle we open and always close here;
+    // a null handle (no such pid, or access denied) is checked first.
+    unsafe {
+        let handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
+        if handle.is_null() {
+            return false;
+        }
+        let mut code = 0u32;
+        let ok = GetExitCodeProcess(handle, &mut code) != 0;
+        CloseHandle(handle);
+        // A process that genuinely exits with code 259 is misreported as
+        // alive; the JVM never does, so this well-known Win32 ambiguity is
+        // acceptable here.
+        ok && code == STILL_ACTIVE as u32
+    }
+}
+
+#[cfg(not(any(target_os = "linux", windows)))]
 fn is_pid_alive(_pid: u32) -> bool {
     false
 }
@@ -371,5 +512,77 @@ mod tests {
         // deterministically instead of racing a real child process.
         store.mark_running(&slug, u32::MAX).unwrap();
         assert!(!store.is_running(&slug).unwrap());
+    }
+
+    #[cfg(any(target_os = "linux", windows))]
+    #[test]
+    fn own_process_is_alive_and_mark_exited_clears_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = InstanceStore::new(Paths::at(dir.path()));
+        let slug = store.create_named("1.21.1", Some("main")).unwrap();
+
+        let me = std::process::id();
+        assert!(is_pid_alive(me));
+        store.mark_running(&slug, me).unwrap();
+        assert!(store.is_running(&slug).unwrap());
+
+        store.mark_exited(&slug, me).unwrap();
+        assert!(!store.is_running(&slug).unwrap());
+    }
+
+    #[test]
+    fn rename_moves_the_directory_and_updates_the_name() {
+        let dir = tempfile::tempdir().unwrap();
+        let paths = Paths::at(dir.path());
+        let store = InstanceStore::new(paths.clone());
+        store.create_named("1.21.1", Some("old")).unwrap();
+        std::fs::write(paths.instance_minecraft_dir("old").join("options.txt"), "x").unwrap();
+
+        let new_slug = store.rename("old", "new").unwrap();
+        assert_eq!(new_slug, "new");
+        assert!(!paths.instance_dir("old").exists());
+        assert!(paths
+            .instance_minecraft_dir("new")
+            .join("options.txt")
+            .is_file());
+        assert_eq!(store.load("new").unwrap().name, "new");
+
+        store.create_named("1.21.1", Some("other")).unwrap();
+        assert!(matches!(
+            store.rename("new", "other"),
+            Err(Error::AlreadyExists(_))
+        ));
+    }
+
+    #[test]
+    fn clone_copies_the_game_dir_but_not_logs() {
+        let dir = tempfile::tempdir().unwrap();
+        let paths = Paths::at(dir.path());
+        let store = InstanceStore::new(paths.clone());
+        store.create_named("1.21.1", Some("src")).unwrap();
+        let mods = paths.instance_minecraft_dir("src").join("mods");
+        std::fs::create_dir_all(&mods).unwrap();
+        std::fs::write(mods.join("a.jar"), "jar").unwrap();
+        std::fs::create_dir_all(paths.instance_logs_dir("src")).unwrap();
+        std::fs::write(paths.instance_logs_dir("src").join("launch-1.log"), "log").unwrap();
+
+        let slug = store.clone_instance("src", "copy").unwrap();
+        assert!(paths
+            .instance_minecraft_dir(&slug)
+            .join("mods/a.jar")
+            .is_file());
+        assert!(!paths.instance_logs_dir(&slug).exists());
+        assert_eq!(store.load(&slug).unwrap().mc_version, "1.21.1");
+    }
+
+    #[test]
+    fn remove_deletes_the_instance() {
+        let dir = tempfile::tempdir().unwrap();
+        let paths = Paths::at(dir.path());
+        let store = InstanceStore::new(paths.clone());
+        store.create_named("1.21.1", Some("gone")).unwrap();
+        store.remove("gone").unwrap();
+        assert!(!paths.instance_dir("gone").exists());
+        assert!(matches!(store.remove("gone"), Err(Error::NotFound(_))));
     }
 }

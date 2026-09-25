@@ -1,21 +1,74 @@
+use std::path::PathBuf;
+
+use bananium_instance::ContentKind;
 use serde::{Deserialize, Serialize};
+
+/// Sort order for `Command::ModrinthSearch`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
+#[serde(rename_all = "snake_case")]
+pub enum SearchSort {
+    #[default]
+    Relevance,
+    Downloads,
+    Follows,
+    Newest,
+    Updated,
+}
 
 /// Every action a frontend can ask for. New variants land milestone by
 /// milestone; nothing outside `bananium-api` may add capability that isn't
 /// expressed here first (see PLAN.md's frontend contract).
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 #[serde(tag = "command", rename_all = "snake_case")]
 pub enum Command {
     /// Print the resolved config and paths.
     ConfigShow,
+    /// Change settings in `config.toml`; `None` leaves a setting alone.
+    /// `java_path: Some("")` clears it back to auto-detection.
+    ConfigSet {
+        #[serde(default)]
+        #[cfg_attr(feature = "ts", ts(type = "number | null"))]
+        max_concurrent_downloads: Option<usize>,
+        #[serde(default)]
+        #[cfg_attr(feature = "ts", ts(type = "string | null"))]
+        java_path: Option<PathBuf>,
+    },
+    /// Every JVM detected on this machine.
+    JavaList,
+    /// Screenshots from every instance (or just `instance`), newest first.
+    ScreenshotList {
+        #[serde(default)]
+        instance: Option<String>,
+    },
+    /// Delete one screenshot (must be inside an instance's `screenshots/`).
+    ScreenshotDelete {
+        #[cfg_attr(feature = "ts", ts(type = "string"))]
+        path: PathBuf,
+    },
     /// Download everything needed to launch `version` offline afterwards,
     /// creating an instance for it named `name` (or a fresh random name
     /// when omitted) if one doesn't already exist under that name.
     /// Distinct names let several instances share the same `version`.
+    ///
+    /// `fabric_loader` installs the Fabric mod loader on top: a loader
+    /// version such as `"0.16.9"`, or `"latest"` for the newest stable one.
     Install {
         version: String,
         #[serde(default)]
         name: Option<String>,
+        #[serde(default)]
+        fabric_loader: Option<String>,
+    },
+    /// Every Minecraft version Mojang publishes, newest first.
+    VersionList {
+        #[serde(default)]
+        include_snapshots: bool,
+    },
+    /// Fabric loader releases compatible with `mc_version`, newest first.
+    FabricLoaderList {
+        mc_version: String,
     },
     /// Launch an instance. `instance` is optional only when exactly one is
     /// installed. `profile` selects a named local (offline) profile,
@@ -47,5 +100,171 @@ pub enum Command {
         /// alone.
         #[serde(default)]
         jvm_args: Option<Vec<String>>,
+        /// Per-instance Java executable. `Some("")` clears it back to the
+        /// global setting/auto-detection; `None` leaves it alone.
+        #[serde(default)]
+        #[cfg_attr(feature = "ts", ts(type = "string | null"))]
+        java_path: Option<PathBuf>,
+    },
+    /// Delete an instance and everything in it. Refused while running.
+    InstanceRemove {
+        instance: String,
+    },
+    /// Rename an instance (its directory/slug changes too). Refused while
+    /// running.
+    InstanceRename {
+        instance: String,
+        new_name: String,
+    },
+    /// Copy an instance, game directory and all, under a new name.
+    InstanceClone {
+        instance: String,
+        new_name: String,
+    },
+    /// Force-stop a game this session launched.
+    InstanceKill {
+        instance: String,
+    },
+    /// Every launch log for an instance, newest first.
+    LogList {
+        instance: String,
+    },
+    /// Read a chunk of a launch log (the newest when `file` is `None`)
+    /// from byte `offset`. Poll with the returned `next_offset` to tail it.
+    LogRead {
+        instance: String,
+        #[serde(default)]
+        file: Option<String>,
+        #[serde(default)]
+        #[cfg_attr(feature = "ts", ts(type = "number"))]
+        offset: u64,
+    },
+    /// Search Modrinth for one kind of content. With `instance`, results
+    /// are narrowed to what that instance can use (its Minecraft version,
+    /// and Fabric/Iris compatibility) and flagged if already installed.
+    ModrinthSearch {
+        query: String,
+        kind: ContentKind,
+        #[serde(default)]
+        instance: Option<String>,
+        /// Modrinth category slugs, each required (AND).
+        #[serde(default)]
+        categories: Vec<String>,
+        #[serde(default)]
+        sort: SearchSort,
+        #[serde(default)]
+        offset: u32,
+        #[serde(default)]
+        limit: u32,
+    },
+    /// Full details of one Modrinth project (id or slug).
+    ModrinthProject {
+        project: String,
+    },
+    /// Every version of a Modrinth project, newest first, each flagged
+    /// with whether `instance` can use it.
+    ModrinthVersions {
+        project: String,
+        kind: ContentKind,
+        #[serde(default)]
+        instance: Option<String>,
+    },
+    /// Everything installed in an instance (all kinds), reconciled with
+    /// what's actually in its folders.
+    ContentList {
+        instance: String,
+    },
+    /// Install a Modrinth project (newest compatible version, or `version`)
+    /// plus its required dependencies. A shader pack also brings in Iris.
+    ContentInstall {
+        instance: String,
+        kind: ContentKind,
+        project: String,
+        #[serde(default)]
+        version: Option<String>,
+    },
+    /// Delete one installed file.
+    ContentRemove {
+        instance: String,
+        kind: ContentKind,
+        filename: String,
+    },
+    /// Enable or disable one installed file (renames it to/from `.disabled`).
+    ContentToggle {
+        instance: String,
+        kind: ContentKind,
+        filename: String,
+        enabled: bool,
+    },
+    /// Copy a file from disk into the instance, then try to identify it on
+    /// Modrinth.
+    ContentImport {
+        instance: String,
+        kind: ContentKind,
+        #[cfg_attr(feature = "ts", ts(type = "string"))]
+        path: PathBuf,
+    },
+    /// Look up untracked files on Modrinth by hash and record what they are.
+    ContentIdentify {
+        instance: String,
+    },
+    /// Which installed Modrinth content has a newer compatible version.
+    ContentCheckUpdates {
+        instance: String,
+    },
+    /// Update the given projects to their newest compatible versions.
+    ContentUpdate {
+        instance: String,
+        projects: Vec<String>,
+    },
+    /// Every saved content preset.
+    PresetList,
+    /// Save an instance's Modrinth content (of `kinds`; all kinds when
+    /// empty) as a preset, replacing any preset with the same name.
+    PresetSave {
+        instance: String,
+        name: String,
+        #[serde(default)]
+        kinds: Vec<ContentKind>,
+    },
+    /// Install a preset's projects into an instance, each at a version that
+    /// instance can use; ones with no such version are skipped, not fatal.
+    PresetApply {
+        preset: String,
+        instance: String,
+    },
+    PresetDelete {
+        name: String,
+    },
+    PresetRename {
+        name: String,
+        new_name: String,
+    },
+    /// Write a preset to a file, for sharing.
+    PresetExport {
+        name: String,
+        #[cfg_attr(feature = "ts", ts(type = "string"))]
+        path: PathBuf,
+    },
+    /// Load a shared preset file.
+    PresetImport {
+        #[cfg_attr(feature = "ts", ts(type = "string"))]
+        path: PathBuf,
+    },
+    /// Every saved offline (local) profile, i.e. the usernames a launch can
+    /// play as.
+    ProfileList,
+    /// Save a new offline profile. `name` must be a valid vanilla username
+    /// (3–16 letters, digits, or `_`) not already taken case-insensitively.
+    ProfileAdd {
+        name: String,
+    },
+    /// Delete a saved offline profile.
+    ProfileRemove {
+        name: String,
+    },
+    /// Make `name` the profile a `Launch` without an explicit `profile` uses.
+    ProfileSetDefault {
+        name: String,
     },
 }

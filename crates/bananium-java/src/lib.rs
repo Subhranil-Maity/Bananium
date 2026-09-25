@@ -72,6 +72,76 @@ pub fn find_java(override_path: Option<&Path>) -> Result<JavaCandidate> {
     Err(Error::NotFound)
 }
 
+/// Every JVM that can be found on this machine, deduplicated, for a
+/// frontend's Java picker: `JAVA_HOME`, every `PATH` hit (not just the
+/// first), and the usual per-OS install folders (including IntelliJ's
+/// `~/.jdks`). Each is probed with `java -version`, so this takes a moment
+/// per candidate — call it on demand, not on every launch.
+pub fn find_all_java() -> Vec<JavaCandidate> {
+    let exe = java_exe_name();
+    let mut paths: Vec<PathBuf> = Vec::new();
+    if let Ok(home) = std::env::var("JAVA_HOME") {
+        paths.push(PathBuf::from(home).join("bin").join(exe));
+    }
+    if let Some(path_var) = std::env::var_os("PATH") {
+        paths.extend(std::env::split_paths(&path_var).map(|dir| dir.join(exe)));
+    }
+
+    // Parent folders whose children are JDK/JRE installs.
+    let mut roots: Vec<PathBuf> = Vec::new();
+    if let Some(home) = std::env::var_os("USERPROFILE").or_else(|| std::env::var_os("HOME")) {
+        roots.push(PathBuf::from(home).join(".jdks"));
+    }
+    if cfg!(windows) {
+        for base in ["ProgramFiles", "ProgramFiles(x86)"] {
+            if let Some(pf) = std::env::var_os(base) {
+                let pf = PathBuf::from(pf);
+                for vendor in [
+                    "Java",
+                    "Eclipse Adoptium",
+                    "Microsoft",
+                    "Zulu",
+                    "Amazon Corretto",
+                    "BellSoft",
+                ] {
+                    roots.push(pf.join(vendor));
+                }
+            }
+        }
+    } else if cfg!(target_os = "macos") {
+        roots.push(PathBuf::from("/Library/Java/JavaVirtualMachines"));
+    } else {
+        roots.push(PathBuf::from("/usr/lib/jvm"));
+    }
+    for root in roots {
+        let Ok(entries) = std::fs::read_dir(&root) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let dir = entry.path();
+            // macOS bundles keep the JDK under Contents/Home.
+            paths.push(dir.join("bin").join(exe));
+            paths.push(dir.join("Contents").join("Home").join("bin").join(exe));
+        }
+    }
+
+    let mut seen = std::collections::HashSet::new();
+    let mut found: Vec<JavaCandidate> = paths
+        .into_iter()
+        .filter(|p| p.is_file())
+        .filter(|p| seen.insert(std::fs::canonicalize(p).unwrap_or_else(|_| p.clone())))
+        .filter_map(|p| probe(&p))
+        .collect();
+    found.sort_by_key(|c| std::cmp::Reverse(c.major_version));
+    found
+}
+
+/// Probe one user-chosen path (e.g. from a file picker), returning its
+/// version if it's a runnable `java`.
+pub fn probe_java(path: &Path) -> Option<JavaCandidate> {
+    probe(path)
+}
+
 /// Search every directory on `PATH` for `exe_name`, returning the first hit
 /// — a manual re-implementation of shell `which` so this crate doesn't need
 /// an extra dependency just for that.
@@ -150,5 +220,16 @@ mod tests {
             "expected to find a JVM via JAVA_HOME/PATH: {found:?}"
         );
         assert!(found.unwrap().major_version >= 8);
+    }
+
+    #[test]
+    fn find_all_includes_what_find_java_finds() {
+        let first = find_java(None).unwrap();
+        let first = std::fs::canonicalize(&first.path).unwrap();
+        let all: Vec<PathBuf> = find_all_java()
+            .iter()
+            .map(|c| std::fs::canonicalize(&c.path).unwrap())
+            .collect();
+        assert!(all.contains(&first), "{first:?} missing from {all:?}");
     }
 }

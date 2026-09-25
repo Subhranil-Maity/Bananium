@@ -16,6 +16,15 @@ pub enum Error {
 
     #[error("version {0:?} was not found in the Mojang version manifest")]
     UnknownVersion(String),
+
+    #[error("Fabric has no loader for Minecraft {0}")]
+    NoFabricLoader(String),
+
+    #[error("library {0:?} has no usable maven coordinate or checksum")]
+    BadMavenCoordinate(String),
+
+    #[error("malformed checksum file at {0}")]
+    BadChecksum(String),
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
