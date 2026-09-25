@@ -24,15 +24,8 @@ impl Session {
     /// `rel` is the game directory itself.
     fn resolve_game_path(&self, instance: &str, rel: &str) -> Result<PathBuf> {
         self.instances().resolve(Some(instance))?;
-        let mut path = self.paths.instance_minecraft_dir(instance);
-        for part in rel.split(['/', '\\']).filter(|p| !p.is_empty()) {
-            let mut components = Path::new(part).components();
-            match (components.next(), components.next()) {
-                (Some(Component::Normal(name)), None) => path.push(name),
-                _ => return Err(Error::InvalidPath(rel.to_string())),
-            }
-        }
-        Ok(path)
+        join_relative(&self.paths.instance_minecraft_dir(instance), rel)
+            .ok_or_else(|| Error::InvalidPath(rel.to_string()))
     }
 
     /// Like [`Session::resolve_game_path`], but refuses the game directory
@@ -194,6 +187,22 @@ impl Session {
             count: sources.len() as u32,
         })
     }
+}
+
+/// `root` joined with the `/`- or `\`-separated relative path `rel`, or
+/// `None` if any component could leave `root` (`..`, `.`, a drive prefix or
+/// root). Empty components are skipped, so a leading `/` stays relative.
+/// Shared with modpack installs, whose file paths come from the pack.
+pub(super) fn join_relative(root: &Path, rel: &str) -> Option<PathBuf> {
+    let mut path = root.to_path_buf();
+    for part in rel.split(['/', '\\']).filter(|p| !p.is_empty()) {
+        let mut components = Path::new(part).components();
+        match (components.next(), components.next()) {
+            (Some(Component::Normal(name)), None) => path.push(name),
+            _ => return None,
+        }
+    }
+    Some(path)
 }
 
 fn copy_recursive(from: &Path, to: &Path) -> Result<()> {

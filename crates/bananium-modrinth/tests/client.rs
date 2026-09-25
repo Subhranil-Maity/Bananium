@@ -182,6 +182,41 @@ async fn project_lookup_by_slug() {
 }
 
 #[tokio::test]
+async fn projects_batch_lookup_sends_ids_as_a_json_array() {
+    let server = MockServer::start().await;
+    let project = |id: &str, title: &str| {
+        serde_json::json!({
+            "id": id, "team": "t", "slug": null, "title": title, "description": "",
+            "body": "", "status": "approved", "project_type": "mod", "categories": [],
+            "additional_categories": [], "game_versions": [], "loaders": [], "versions": [],
+            "license": null, "published": "2020-01-01T00:00:00Z",
+            "updated": "2024-01-01T00:00:00Z", "downloads": 0, "followers": 0,
+            "gallery": [], "icon_url": null, "donation_urls": [],
+        })
+    };
+    Mock::given(method("GET"))
+        .and(path("/projects"))
+        .and(query_param("ids", r#"["AA","BB"]"#))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(vec![project("AA", "Sodium"), project("BB", "Iris")]),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let client = client_for(&server).await;
+    let projects = client
+        .projects(&["AA".to_string(), "BB".to_string()])
+        .await
+        .expect("batch lookup succeeds");
+    assert_eq!(projects.len(), 2);
+    assert_eq!(projects[1].title, "Iris");
+    // No request at all for an empty list.
+    assert!(client.projects(&[]).await.unwrap().is_empty());
+}
+
+#[tokio::test]
 async fn project_versions_sends_loader_and_game_version_filters_as_json_arrays() {
     let server = MockServer::start().await;
 

@@ -7,13 +7,13 @@ pub mod event;
 pub mod output;
 pub mod session;
 
-pub use command::{Command, SearchSort};
+pub use command::{Command, ModpackSource, SearchSort};
 pub use error::{Error, Result};
 pub use event::Event;
 pub use output::{
-    CommandOutput, ContentUpdateInfo, FabricLoaderSummary, GalleryItem, InstanceSummary,
-    JavaInstall, LogFile, ModrinthHit, ModrinthProject, ModrinthVersion, ProfileSummary,
-    ResolvedPaths, Screenshot, SkippedEntry, VersionSummary,
+    CommandOutput, ContentUpdateInfo, FabricLoaderSummary, FileEntry, GalleryItem, InstanceSummary,
+    JavaInstall, LogFile, ModpackSummary, ModrinthHit, ModrinthProject, ModrinthVersion,
+    ProfileSummary, ResolvedPaths, Screenshot, SkippedEntry, VersionSummary,
 };
 pub use session::Session;
 

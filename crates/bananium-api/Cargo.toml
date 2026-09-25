@@ -14,7 +14,9 @@ bananium-launch = { path = "../bananium-launch" }
 bananium-java = { path = "../bananium-java" }
 bananium-modrinth = { path = "../bananium-modrinth" }
 serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 thiserror = "2"
+zip = { version = "2", default-features = false, features = ["deflate"] }
 tokio = { version = "1", features = ["sync", "rt", "process", "macros"] }
 tracing = "0.1"
 ts-rs = { version = "12.0.1", optional = true }
@@ -22,7 +24,6 @@ ts-rs = { version = "12.0.1", optional = true }
 [dev-dependencies]
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 tempfile = "3"
-serde_json = "1"
 
 [features]
 # Derive TypeScript bindings for `Command`/`CommandOutput`/`Event` and their

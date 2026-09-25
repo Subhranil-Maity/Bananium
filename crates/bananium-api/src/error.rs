@@ -63,6 +63,10 @@ pub enum Error {
     NotText(String),
     #[error("{0:?} already exists")]
     FileExists(String),
+    #[error("not a valid .mrpack: {0}")]
+    BadModpack(String),
+    #[error("{0}")]
+    UnsupportedModpack(String),
 }
 
 /// Generates a `From<$source> for Error` that boxes on the way in. Written

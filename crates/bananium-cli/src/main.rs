@@ -5,7 +5,7 @@ use std::io::{IsTerminal, Write};
 
 use bananium_api::{
     is_valid_instance_name, Command, CommandOutput, Config, ConfigOverrides, ContentKind, Event,
-    Paths, Session,
+    ModpackSource, Paths, Session,
 };
 use clap::{Parser, Subcommand};
 use tokio::sync::broadcast;
@@ -96,6 +96,32 @@ enum Cmd {
     Profile {
         #[command(subcommand)]
         action: ProfileAction,
+    },
+    /// Modrinth modpacks (.mrpack).
+    Modpack {
+        #[command(subcommand)]
+        action: ModpackAction,
+    },
+}
+
+#[derive(Subcommand)]
+enum ModpackAction {
+    /// Show what a local .mrpack needs.
+    Info { file: std::path::PathBuf },
+    /// Create an instance from a local .mrpack or a Modrinth modpack
+    /// (project id or slug).
+    Install {
+        /// Path to a .mrpack file, or a Modrinth project id/slug.
+        source: String,
+        /// Modrinth version id; defaults to the newest stable release.
+        #[arg(long)]
+        version: Option<String>,
+        /// Instance name; defaults to the pack's name.
+        #[arg(long)]
+        name: Option<String>,
+        /// Library group for the new instance.
+        #[arg(long)]
+        group: Option<String>,
     },
 }
 
@@ -325,6 +351,30 @@ async fn run_cli(command: Cmd, format_json: bool) -> std::process::ExitCode {
             ProfileAction::Add { name } => Command::ProfileAdd { name },
             ProfileAction::Rm { name } => Command::ProfileRemove { name },
             ProfileAction::Default { name } => Command::ProfileSetDefault { name },
+        },
+        Cmd::Modpack { action } => match action {
+            ModpackAction::Info { file } => Command::ModpackInspect { path: file },
+            ModpackAction::Install {
+                source,
+                version,
+                name,
+                group,
+            } => {
+                let path = std::path::PathBuf::from(&source);
+                let source = if path.is_file() {
+                    ModpackSource::File { path }
+                } else {
+                    ModpackSource::Modrinth {
+                        project: source,
+                        version,
+                    }
+                };
+                Command::ModpackInstall {
+                    source,
+                    name,
+                    group,
+                }
+            }
         },
     };
 
@@ -757,6 +807,20 @@ fn print_output(output: &CommandOutput, as_json: bool) {
         CommandOutput::FileWritten { path } => println!("wrote {path}"),
         CommandOutput::FileDeleted { path } => println!("deleted {path}"),
         CommandOutput::FileImported { count } => println!("imported {count} item(s)"),
+        CommandOutput::ModpackInspected { pack } => {
+            println!("{} {}", pack.name, pack.version_id);
+            let loader = match &pack.loader_version {
+                Some(v) => format!("Fabric {v}"),
+                None => "vanilla".to_string(),
+            };
+            println!(
+                "Minecraft {} · {loader} · {} files",
+                pack.mc_version, pack.file_count
+            );
+            if let Some(reason) = &pack.unsupported {
+                println!("can't install: {reason}");
+            }
+        }
         CommandOutput::ProfileListed { profiles } => {
             if profiles.is_empty() {
                 println!("no profiles yet (\"Player\" is created on first launch)");

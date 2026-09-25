@@ -77,6 +77,13 @@ milestone order — see the table below for exactly what each covers:
   in a long-lived session, estimated from the log's mtime when a dead run is
   swept), the content lockfile, and presets. Still missing: export/import
   formats, tags.
+- **Modpacks** (`bananium-api/src/session/modpacks.rs`): Modrinth `.mrpack`
+  search/versions/inspect/install (`bananium modpack install <file|slug>`).
+  An install is a normal `install` of the pack's pinned Minecraft + Fabric,
+  then the pack's files through the content store (SHA-1 verified), then
+  `overrides/` + `client-overrides/`, the project icon, and `identify`.
+  Forge/NeoForge/Quilt packs are refused. Verified for real with
+  Fabulously Optimized (49 mods, dry-run launch OK).
 - `File*` commands (`bananium-api/src/session/files.rs`) are a file manager
   over an instance's game directory; `resolve_game_path` is the single gate
   that refuses anything escaping it.

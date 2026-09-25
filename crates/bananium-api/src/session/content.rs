@@ -152,7 +152,21 @@ impl Session {
         for c in categories {
             facets = facets.and(Facet::category(c));
         }
+        self.run_search(facets, query, sort, offset, limit, &installed)
+            .await
+    }
 
+    /// Run a Modrinth search with prepared `facets`, marking hits whose
+    /// project is in `installed`.
+    pub(super) async fn run_search(
+        &self,
+        facets: FacetsBuilder,
+        query: &str,
+        sort: SearchSort,
+        offset: u32,
+        limit: u32,
+        installed: &HashSet<String>,
+    ) -> Result<CommandOutput> {
         let mut search = SearchQuery::new()
             .facets(facets.build())
             .index(match sort {
@@ -626,7 +640,7 @@ impl Session {
 
     /// Match untracked files to Modrinth versions by SHA-1 and record the
     /// project/version they belong to. Returns how many were identified.
-    async fn identify(&self, instance: &str) -> Result<u32> {
+    pub(super) async fn identify(&self, instance: &str) -> Result<u32> {
         let store = self.content();
         let unknown: Vec<ContentEntry> = store
             .sync(instance)?
@@ -641,12 +655,28 @@ impl Session {
             .modrinth
             .version_files(&hashes, HashAlgorithm::Sha1)
             .await?;
+        // One batched lookup for every matched project (a modpack can match
+        // dozens), rather than a request each against the rate limit.
+        let ids: Vec<String> = found
+            .values()
+            .map(|v| v.project_id.clone())
+            .collect::<HashSet<_>>()
+            .into_iter()
+            .collect();
+        let mut projects = HashMap::new();
+        for chunk in ids.chunks(100) {
+            for p in self.modrinth.projects(chunk).await? {
+                projects.insert(p.id.clone(), p);
+            }
+        }
         let mut count = 0;
         for entry in unknown {
             let Some(version) = entry.sha1.as_ref().and_then(|h| found.get(h)) else {
                 continue;
             };
-            let project = self.modrinth.project(&version.project_id).await?;
+            let Some(project) = projects.get(&version.project_id) else {
+                continue;
+            };
             store.update_metadata(instance, entry.kind, &entry.filename, |e| {
                 e.title = project.title.clone();
                 e.icon_url = project.icon_url.clone();

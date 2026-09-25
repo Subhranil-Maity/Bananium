@@ -13,8 +13,9 @@ function isStepPhase(task: Task): boolean {
 
 function percent(task: Task): number {
   if (task.status === "completed") return 100;
-  if (isStepPhase(task)) return task.filesTotal ? (task.filesDone / task.filesTotal) * 100 : 0;
-  if (!task.bytesTotal) return 0;
+  // No byte total (a step phase, or downloads with unpublished sizes):
+  // fall back to counting files/steps rather than sitting at 0%.
+  if (isStepPhase(task) || !task.bytesTotal) return task.filesTotal ? (task.filesDone / task.filesTotal) * 100 : 0;
   return Math.min(100, (task.bytesDone / task.bytesTotal) * 100);
 }
 

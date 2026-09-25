@@ -3,7 +3,6 @@ import { useSearchParams } from "react-router";
 import { useInfiniteQuery } from "@tanstack/react-query";
 import { CalendarClock, Check, Download, Heart, Loader2, Search } from "lucide-react";
 
-import type { ContentKind } from "@/bindings/ContentKind";
 import type { ModrinthHit } from "@/bindings/ModrinthHit";
 import type { SearchSort } from "@/bindings/SearchSort";
 import { Button } from "@/components/ui/button";
@@ -23,7 +22,8 @@ import { ProjectSheet } from "@/components/project-sheet";
 import { useInstallContent } from "@/hooks/use-content";
 import { useInstances } from "@/hooks/use-instances";
 import { errorMessage, run } from "@/lib/api";
-import { KINDS, formatCount } from "@/lib/content";
+import { BROWSE_KINDS, formatCount, type BrowseKind } from "@/lib/content";
+import { useNewInstance } from "@/components/new-instance-dialog";
 import { loaderLabel } from "@/lib/instances";
 import { cn, formatRelative } from "@/lib/utils";
 
@@ -38,7 +38,19 @@ const SORTS: { value: SearchSort; label: string }[] = [
 ];
 
 /** Modrinth category slugs offered as filters, per content kind. */
-const CATEGORIES: Record<ContentKind, string[]> = {
+const CATEGORIES: Record<BrowseKind, string[]> = {
+  modpack: [
+    "adventure",
+    "challenging",
+    "combat",
+    "kitchen-sink",
+    "lightweight",
+    "magic",
+    "multiplayer",
+    "optimization",
+    "quests",
+    "technology",
+  ],
   mod: [
     "adventure",
     "decoration",
@@ -116,11 +128,12 @@ function HitCard({
   onOpen,
 }: {
   hit: ModrinthHit;
-  kind: ContentKind;
+  kind: BrowseKind;
   instance: string | null;
   onOpen: () => void;
 }) {
   const install = useInstallContent();
+  const openModpack = useNewInstance((s) => s.openModpack);
   return (
     <div
       className="group flex cursor-pointer gap-3.5 rounded-lg border bg-card p-3 transition-colors hover:border-foreground/15 hover:bg-accent/40"
@@ -158,7 +171,18 @@ function HitCard({
             <CalendarClock className="size-3.5" /> {formatRelative(Date.parse(hit.date_modified) / 1000)}
           </div>
         </div>
-        {instance &&
+        {kind === "modpack" ? (
+          <Button
+            size="sm"
+            onClick={(e) => {
+              e.stopPropagation();
+              openModpack({ source: "modrinth", projectId: hit.project_id, title: hit.title, iconUrl: hit.icon_url });
+            }}
+          >
+            <Download /> Install
+          </Button>
+        ) : (
+          instance &&
           (hit.installed ? (
             <span className="flex h-7 items-center gap-1 rounded-md bg-success/10 px-2.5 text-xs font-medium text-success">
               <Check className="size-3.5" /> Installed
@@ -175,7 +199,8 @@ function HitCard({
               {install.isPending ? <Loader2 className="animate-spin" /> : <Download />}
               Install
             </Button>
-          ))}
+          ))
+        )}
       </div>
     </div>
   );
@@ -196,8 +221,10 @@ function FilterHeading({ children, action }: { children: React.ReactNode; action
  */
 export function BrowsePage() {
   const [params, setParams] = useSearchParams();
-  const kind = (params.get("kind") as ContentKind | null) ?? "mod";
-  const instance = params.get("instance");
+  const kind = (params.get("kind") as BrowseKind | null) ?? "mod";
+  const modpacks = kind === "modpack";
+  // Modpacks become new instances, so there's no target instance for them.
+  const instance = modpacks ? null : params.get("instance");
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState<SearchSort>("relevance");
   const [categories, setCategories] = useState<string[]>([]);
@@ -218,16 +245,18 @@ export function BrowsePage() {
     queryKey: ["modrinth-search", kind, instance, debouncedQuery, sort, categories],
     queryFn: ({ pageParam }) =>
       run(
-        {
-          command: "modrinth_search",
-          query: debouncedQuery,
-          kind,
-          instance,
-          categories,
-          sort,
-          offset: pageParam,
-          limit: PAGE,
-        },
+        kind === "modpack"
+          ? { command: "modpack_search", query: debouncedQuery, categories, sort, offset: pageParam, limit: PAGE }
+          : {
+              command: "modrinth_search",
+              query: debouncedQuery,
+              kind,
+              instance,
+              categories,
+              sort,
+              offset: pageParam,
+              limit: PAGE,
+            },
         "modrinth_searched",
       ),
     initialPageParam: 0,
@@ -257,7 +286,7 @@ export function BrowsePage() {
     <Page>
       <PageHeader title="Browse Modrinth" meta={total !== undefined && `${formatCount(total)} results`}>
         <div className="flex rounded-md border bg-muted/40 p-0.5">
-          {KINDS.map((k) => (
+          {BROWSE_KINDS.map((k) => (
             <button
               key={k.kind}
               onClick={() => {
@@ -277,6 +306,11 @@ export function BrowsePage() {
 
       <div className="grid grid-cols-[220px_1fr] items-start gap-5">
         <aside className="sticky top-4 space-y-5">
+          {modpacks ? (
+            <p className="rounded-md border bg-muted/30 px-2.5 py-2 text-[11px] text-muted-foreground">
+              Installing a modpack creates a new instance with the pack's Minecraft version, Fabric loader and mods.
+            </p>
+          ) : (
           <div>
             <FilterHeading>Install to</FilterHeading>
             <Select value={instance ?? ANY} onValueChange={(v) => setParam("instance", v === ANY ? null : v)}>
@@ -302,6 +336,7 @@ export function BrowsePage() {
                 : "Pick an instance to filter by compatibility and install in one click."}
             </p>
           </div>
+          )}
 
           <div>
             <FilterHeading
@@ -346,7 +381,7 @@ export function BrowsePage() {
               <Search className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground" />
               <Input
                 className="h-9 pl-8"
-                placeholder={`Search ${KINDS.find((k) => k.kind === kind)!.label.toLowerCase()}…`}
+                placeholder={`Search ${BROWSE_KINDS.find((k) => k.kind === kind)!.label.toLowerCase()}…`}
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
               />

@@ -208,6 +208,25 @@ pub struct LogFile {
     pub modified_unix: u64,
 }
 
+/// What a modpack needs, read from its `modrinth.index.json`.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
+pub struct ModpackSummary {
+    pub name: String,
+    /// The pack's own version, e.g. `"5.3.0"`.
+    pub version_id: String,
+    pub summary: Option<String>,
+    pub mc_version: String,
+    /// `"vanilla"` or `"fabric"`.
+    pub loader: String,
+    pub loader_version: Option<String>,
+    /// Files downloaded on install (server-only files excluded).
+    pub file_count: u32,
+    /// Why Bananium can't install this pack (e.g. it needs Forge); `None`
+    /// when it can.
+    pub unsupported: Option<String>,
+}
+
 /// One entry of a folder in an instance's game directory, as listed by
 /// `Command::FileList`.
 #[derive(Debug, Clone, Serialize)]
@@ -327,6 +346,9 @@ pub enum CommandOutput {
     },
     ModrinthVersionsListed {
         versions: Vec<ModrinthVersion>,
+    },
+    ModpackInspected {
+        pack: ModpackSummary,
     },
     ContentListed {
         instance: String,

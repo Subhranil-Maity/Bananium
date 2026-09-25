@@ -85,6 +85,19 @@ impl ModrinthClient {
         .await
     }
 
+    /// `GET /projects?ids=[...]` — many projects in one request, in no
+    /// particular order; unknown ids are simply absent. Use this instead of
+    /// a [`ModrinthClient::project`] loop, which is one request each against
+    /// a 300-requests-per-minute budget.
+    pub async fn projects(&self, ids: &[String]) -> Result<Vec<Project>> {
+        if ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        let params = [("ids".to_string(), json_string_array(ids))];
+        self.request(Method::GET, "projects", &params, None::<&()>)
+            .await
+    }
+
     /// `GET /project/{id|slug}/version` — a project's versions, optionally
     /// narrowed to those matching `filter`.
     pub async fn project_versions(

@@ -15,7 +15,6 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import {
   Select,
   SelectContent,
@@ -27,38 +26,38 @@ import { Switch } from "@/components/ui/switch";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { VALID_INSTANCE_NAME } from "@/components/instance-actions";
 import { InstanceIcon } from "@/components/instance-icon";
+import { Field, GroupPicker, uniqueInstanceName } from "@/components/instance-form-parts";
+import { ModpackForm, type ModpackTarget } from "@/components/modpack-form";
 import { INSTANCES_KEY, pickIconFile, useInstances } from "@/hooks/use-instances";
 import { useApplyPreset, usePresets } from "@/hooks/use-presets";
 import { errorMessage, run } from "@/lib/api";
 import { allGroups } from "@/lib/instances";
-import { cn } from "@/lib/utils";
 
 const LATEST = "latest";
 const NO_PRESET = "__none__";
 
-/** Open state for the dialog, so the rail, library and palette can all open it. */
-export const useNewInstance = create<{ open: boolean; setOpen: (open: boolean) => void }>((set) => ({
+interface NewInstanceState {
+  open: boolean;
+  /** Set when creating from a modpack instead of from scratch. */
+  modpack: ModpackTarget | null;
+  setOpen: (open: boolean) => void;
+  openModpack: (modpack: ModpackTarget) => void;
+}
+
+/**
+ * Open state for the dialog, so the rail, library, palette and Browse page
+ * can all open it — Browse and `.mrpack` import open it in modpack mode.
+ */
+export const useNewInstance = create<NewInstanceState>((set) => ({
   open: false,
-  setOpen: (open) => set({ open }),
+  modpack: null,
+  setOpen: (open) => set(open ? { open } : { open, modpack: null }),
+  openModpack: (modpack) => set({ open: true, modpack }),
 }));
 
 /** "Fabric-1_21_1", made unique against existing names with a numeric suffix. */
 function suggestName(loader: "vanilla" | "fabric", version: string, taken: Set<string>): string {
-  const base = `${loader === "fabric" ? "Fabric" : "Vanilla"}-${version.replace(/[^A-Za-z0-9_-]/g, "_")}`;
-  if (!taken.has(base.toLowerCase())) return base;
-  for (let n = 2; ; n++) if (!taken.has(`${base}-${n}`.toLowerCase())) return `${base}-${n}`;
-}
-
-function Field({ label, children, aside }: { label: string; children: React.ReactNode; aside?: React.ReactNode }) {
-  return (
-    <div className="space-y-1.5">
-      <div className="flex h-5 items-center justify-between">
-        <Label className="text-xs font-medium text-muted-foreground">{label}</Label>
-        {aside}
-      </div>
-      {children}
-    </div>
-  );
+  return uniqueInstanceName(`${loader === "fabric" ? "Fabric" : "Vanilla"}-${version.replace(/\./g, "_")}`, taken);
 }
 
 /** The dialog body; remounted on every open so the form starts fresh. */
@@ -250,24 +249,7 @@ function NewInstanceForm({ onDone }: { onDone: () => void }) {
           )}
 
           <Field label="Group">
-            <Input placeholder="None" value={group} onChange={(e) => setGroup(e.target.value)} />
-            {groups.length > 0 && (
-              <div className="flex flex-wrap gap-1">
-                {groups.map((g) => (
-                  <button
-                    key={g}
-                    type="button"
-                    className={cn(
-                      "rounded border px-1.5 py-0.5 text-[11px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground",
-                      g === group && "border-primary/60 text-foreground",
-                    )}
-                    onClick={() => setGroup(g === group ? "" : g)}
-                  >
-                    {g}
-                  </button>
-                ))}
-              </div>
-            )}
+            <GroupPicker value={group} onChange={setGroup} groups={groups} />
           </Field>
 
           {presets && presets.length > 0 && (
@@ -309,10 +291,18 @@ function NewInstanceForm({ onDone }: { onDone: () => void }) {
 
 /** Create (install) a new instance; download progress shows in the task tray. */
 export function NewInstanceDialog() {
-  const { open, setOpen } = useNewInstance();
+  const { open, modpack, setOpen } = useNewInstance();
+  const done = () => setOpen(false);
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      <DialogContent className="sm:max-w-2xl">{open && <NewInstanceForm onDone={() => setOpen(false)} />}</DialogContent>
+      <DialogContent className="sm:max-w-2xl">
+        {open &&
+          (modpack ? (
+            <ModpackForm key={JSON.stringify(modpack)} modpack={modpack} onDone={done} />
+          ) : (
+            <NewInstanceForm onDone={done} />
+          ))}
+      </DialogContent>
     </Dialog>
   );
 }

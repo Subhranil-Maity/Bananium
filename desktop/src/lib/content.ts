@@ -6,6 +6,14 @@ export const KINDS: { kind: ContentKind; label: string; singular: string }[] = [
   { kind: "shader", label: "Shaders", singular: "shader pack" },
 ];
 
+/** What the Browse page can show: installable content, or modpacks (which become new instances). */
+export type BrowseKind = ContentKind | "modpack";
+
+export const BROWSE_KINDS: { kind: BrowseKind; label: string }[] = [
+  ...KINDS,
+  { kind: "modpack", label: "Modpacks" },
+];
+
 export function kindLabel(kind: ContentKind): string {
   return KINDS.find((k) => k.kind === kind)!.label;
 }

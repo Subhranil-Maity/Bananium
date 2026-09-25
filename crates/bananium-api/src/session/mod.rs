@@ -3,6 +3,7 @@ mod download;
 mod files;
 mod instances;
 mod logs;
+mod modpacks;
 mod presets;
 mod profiles;
 mod system;
@@ -192,6 +193,26 @@ impl Session {
                 .await
             }
             Command::ModrinthProject { project } => self.modrinth_project(&project).await,
+            Command::ModpackSearch {
+                query,
+                categories,
+                sort,
+                offset,
+                limit,
+            } => {
+                self.modpack_search(&query, &categories, sort, offset, limit)
+                    .await
+            }
+            Command::ModpackVersions { project } => self.modpack_versions(&project).await,
+            Command::ModpackInspect { path } => self.modpack_inspect(&path),
+            Command::ModpackInstall {
+                source,
+                name,
+                group,
+            } => {
+                self.modpack_install_tracked(&source, name.as_deref(), group.as_deref())
+                    .await
+            }
             Command::ModrinthVersions {
                 project,
                 kind,

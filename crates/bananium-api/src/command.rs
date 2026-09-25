@@ -16,6 +16,25 @@ pub enum SearchSort {
     Updated,
 }
 
+/// Where `Command::ModpackInstall` gets its `.mrpack` from.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum ModpackSource {
+    /// A version of a Modrinth modpack project, downloaded on install;
+    /// without `version`, its newest stable release Bananium can run.
+    Modrinth {
+        project: String,
+        #[serde(default)]
+        version: Option<String>,
+    },
+    /// A `.mrpack` file on disk.
+    File {
+        #[cfg_attr(feature = "ts", ts(type = "string"))]
+        path: PathBuf,
+    },
+}
+
 /// Every action a frontend can ask for. New variants land milestone by
 /// milestone; nothing outside `bananium-api` may add capability that isn't
 /// expressed here first (see PLAN.md's frontend contract).
@@ -229,6 +248,40 @@ pub enum Command {
         kind: ContentKind,
         #[serde(default)]
         instance: Option<String>,
+    },
+    /// Search Modrinth modpacks that Bananium can run (Fabric).
+    ModpackSearch {
+        #[serde(default)]
+        query: String,
+        /// Modrinth category slugs, each required (AND).
+        #[serde(default)]
+        categories: Vec<String>,
+        #[serde(default)]
+        sort: SearchSort,
+        #[serde(default)]
+        offset: u32,
+        #[serde(default)]
+        limit: u32,
+    },
+    /// Every version of a modpack project, newest first; `compatible`
+    /// marks the ones Bananium can install.
+    ModpackVersions {
+        project: String,
+    },
+    /// Read a local `.mrpack`'s manifest: name, Minecraft and loader
+    /// versions, and whether Bananium can run it.
+    ModpackInspect {
+        #[cfg_attr(feature = "ts", ts(type = "string"))]
+        path: PathBuf,
+    },
+    /// Create a new instance from a modpack. `name` defaults to the pack's
+    /// own name (made valid and unique); an existing name is refused.
+    ModpackInstall {
+        source: ModpackSource,
+        #[serde(default)]
+        name: Option<String>,
+        #[serde(default)]
+        group: Option<String>,
     },
     /// Everything installed in an instance (all kinds), reconciled with
     /// what's actually in its folders.

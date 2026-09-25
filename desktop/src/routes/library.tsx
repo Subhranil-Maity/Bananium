@@ -1,6 +1,8 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router";
-import { ChevronRight, Clock, LayoutGrid, List, MoreHorizontal, Plus, Search, Timer } from "lucide-react";
+import { ChevronRight, Clock, FileUp, LayoutGrid, List, MoreHorizontal, Plus, Search, Timer } from "lucide-react";
+import { open } from "@tauri-apps/plugin-dialog";
+import { getCurrentWebview } from "@tauri-apps/api/webview";
 
 import type { InstanceSummary } from "@/bindings/InstanceSummary";
 import { Button } from "@/components/ui/button";
@@ -209,8 +211,30 @@ function InstanceTable({ instances }: { instances: InstanceSummary[] }) {
 export function LibraryPage() {
   const { data: instances, isLoading, error } = useInstances();
   const openNew = useNewInstance((s) => s.setOpen);
+  const openModpack = useNewInstance((s) => s.openModpack);
   const { view, groupBy, sort, collapsed, set, toggleCollapsed } = usePrefs();
   const [query, setQuery] = useState("");
+
+  async function importMrpack() {
+    const path = await open({
+      multiple: false,
+      title: "Import a Modrinth modpack",
+      filters: [{ name: "Modrinth modpack", extensions: ["mrpack"] }],
+    });
+    if (typeof path === "string") openModpack({ source: "file", path });
+  }
+
+  // Dropping a .mrpack onto the library starts creating an instance from it.
+  useEffect(() => {
+    const unlisten = getCurrentWebview().onDragDropEvent((event) => {
+      if (event.payload.type !== "drop") return;
+      const pack = event.payload.paths.find((p) => p.toLowerCase().endsWith(".mrpack"));
+      if (pack) openModpack({ source: "file", path: pack });
+    });
+    return () => {
+      void unlisten.then((f) => f());
+    };
+  }, [openModpack]);
 
   const sections = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -290,6 +314,9 @@ export function LibraryPage() {
             <List />
           </ToggleGroupItem>
         </ToggleGroup>
+        <Button variant="outline" onClick={() => void importMrpack()} title="Create an instance from a .mrpack file">
+          <FileUp /> Import .mrpack
+        </Button>
         <Button onClick={() => openNew(true)}>
           <Plus /> Create
         </Button>

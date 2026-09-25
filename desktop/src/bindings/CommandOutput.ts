@@ -7,6 +7,7 @@ import type { FileEntry } from "./FileEntry";
 import type { InstanceSummary } from "./InstanceSummary";
 import type { JavaInstall } from "./JavaInstall";
 import type { LogFile } from "./LogFile";
+import type { ModpackSummary } from "./ModpackSummary";
 import type { ModrinthHit } from "./ModrinthHit";
 import type { ModrinthProject } from "./ModrinthProject";
 import type { ModrinthVersion } from "./ModrinthVersion";
@@ -44,7 +45,7 @@ path: string, entries: Array<FileEntry>, } | { "result": "file_contents", path: 
 /**
  * Which log was read; `None` when the instance has no logs yet.
  */
-file: string | null, text: string, next_offset: number, } | { "result": "modrinth_searched", hits: Array<ModrinthHit>, offset: number, total_hits: number, } | { "result": "modrinth_project_shown", project: ModrinthProject, } | { "result": "modrinth_versions_listed", versions: Array<ModrinthVersion>, } | { "result": "content_listed", instance: string, entries: Array<ContentEntry>, } | { "result": "content_installed", instance: string, installed: Array<ContentEntry>, } | { "result": "content_removed", instance: string, filename: string, } | { "result": "content_toggled", instance: string, filename: string, enabled: boolean, } | { "result": "content_imported", instance: string, entry: ContentEntry, } | { "result": "content_identified", instance: string, identified: number, } | { "result": "content_updates_found", instance: string, updates: Array<ContentUpdateInfo>, } | { "result": "java_listed", installs: Array<JavaInstall>, } | { "result": "screenshot_listed", screenshots: Array<Screenshot>, } | { "result": "screenshot_deleted", path: string, } | { "result": "preset_listed", presets: Array<Preset>, } | { "result": "preset_saved", preset: Preset, 
+file: string | null, text: string, next_offset: number, } | { "result": "modrinth_searched", hits: Array<ModrinthHit>, offset: number, total_hits: number, } | { "result": "modrinth_project_shown", project: ModrinthProject, } | { "result": "modrinth_versions_listed", versions: Array<ModrinthVersion>, } | { "result": "modpack_inspected", pack: ModpackSummary, } | { "result": "content_listed", instance: string, entries: Array<ContentEntry>, } | { "result": "content_installed", instance: string, installed: Array<ContentEntry>, } | { "result": "content_removed", instance: string, filename: string, } | { "result": "content_toggled", instance: string, filename: string, enabled: boolean, } | { "result": "content_imported", instance: string, entry: ContentEntry, } | { "result": "content_identified", instance: string, identified: number, } | { "result": "content_updates_found", instance: string, updates: Array<ContentUpdateInfo>, } | { "result": "java_listed", installs: Array<JavaInstall>, } | { "result": "screenshot_listed", screenshots: Array<Screenshot>, } | { "result": "screenshot_deleted", path: string, } | { "result": "preset_listed", presets: Array<Preset>, } | { "result": "preset_saved", preset: Preset, 
 /**
  * Untracked local files that couldn't be included.
  */

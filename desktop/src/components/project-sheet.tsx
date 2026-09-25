@@ -4,14 +4,14 @@ import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { openUrl } from "@tauri-apps/plugin-opener";
 
-import type { ContentKind } from "@/bindings/ContentKind";
 import { Button } from "@/components/ui/button";
+import { useNewInstance } from "@/components/new-instance-dialog";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useInstallContent } from "@/hooks/use-content";
 import { errorMessage, run } from "@/lib/api";
-import { formatCount } from "@/lib/content";
+import { formatCount, type BrowseKind } from "@/lib/content";
 import { cn } from "@/lib/utils";
 
 const VERSION_TYPE: Record<string, string> = {
@@ -28,11 +28,13 @@ export function ProjectSheet({
   onOpenChange,
 }: {
   projectId: string | null;
-  kind: ContentKind;
+  kind: BrowseKind;
   instance: string | null;
   onOpenChange: (open: boolean) => void;
 }) {
   const install = useInstallContent();
+  const openModpack = useNewInstance((s) => s.openModpack);
+  const modpack = kind === "modpack";
   const project = useQuery({
     queryKey: ["modrinth-project", projectId],
     queryFn: async () =>
@@ -45,7 +47,9 @@ export function ProjectSheet({
     queryFn: async () =>
       (
         await run(
-          { command: "modrinth_versions", project: projectId!, kind, instance },
+          kind === "modpack"
+            ? { command: "modpack_versions", project: projectId! }
+            : { command: "modrinth_versions", project: projectId!, kind, instance },
           "modrinth_versions_listed",
         )
       ).versions,
@@ -125,7 +129,7 @@ export function ProjectSheet({
             </TabsList>
 
             <TabsContent value="versions">
-              {!instance && (
+              {!instance && !modpack && (
                 <p className="mb-2 rounded-md border border-dashed px-3 py-2 text-xs text-muted-foreground">
                   Pick an instance under "Install to" on the Browse page to install a specific version.
                 </p>
@@ -158,9 +162,30 @@ export function ProjectSheet({
                     <Button
                       size="sm"
                       variant="outline"
-                      disabled={!instance || !v.compatible || install.isPending}
-                      title={v.compatible ? "Install this version" : "Not compatible with the target instance"}
-                      onClick={() => install.mutate({ instance: instance!, kind, project: p.id, version: v.id })}
+                      disabled={(!modpack && !instance) || !v.compatible || install.isPending}
+                      title={
+                        v.compatible
+                          ? modpack
+                            ? "Create an instance from this version"
+                            : "Install this version"
+                          : modpack
+                            ? "Needs a loader Bananium doesn't support"
+                            : "Not compatible with the target instance"
+                      }
+                      onClick={() => {
+                        if (kind === "modpack") {
+                          onOpenChange(false);
+                          openModpack({
+                            source: "modrinth",
+                            projectId: p.id,
+                            title: p.title,
+                            iconUrl: p.icon_url,
+                            versionId: v.id,
+                          });
+                        } else {
+                          install.mutate({ instance: instance!, kind, project: p.id, version: v.id });
+                        }
+                      }}
                     >
                       {install.isPending ? <Loader2 className="animate-spin" /> : <Download />}
                       Install
