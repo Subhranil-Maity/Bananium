@@ -1,11 +1,10 @@
 import { useState } from "react";
-import { Loader2, Star, Trash2 } from "lucide-react";
+import { Check, Loader2, Plus, Trash2 } from "lucide-react";
 
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
+import { EmptyState, Page, PageHeader } from "@/components/page";
 import { PlayerAvatar } from "@/components/player-avatar";
 import {
   VALID_PLAYER_NAME,
@@ -15,8 +14,9 @@ import {
   useSetDefaultProfile,
 } from "@/hooks/use-profiles";
 import { errorMessage } from "@/lib/api";
+import { cn } from "@/lib/utils";
 
-/** Manage offline accounts: add, choose the default, remove. */
+/** Manage offline accounts: add, choose who you play as, remove. */
 export function AccountsPage() {
   const { data: profiles, isLoading, error } = useProfiles();
   const add = useAddProfile();
@@ -34,67 +34,71 @@ export function AccountsPage() {
   }
 
   return (
-    <div className="max-w-2xl space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold">Accounts</h1>
-        <p className="text-sm text-muted-foreground">
-          Offline usernames. The starred account is who you play as.
-        </p>
+    <Page className="max-w-3xl">
+      <PageHeader title="Accounts" meta="Offline usernames — the selected one is who you play as" />
+
+      <form className="mb-1 flex gap-2" onSubmit={submit}>
+        <Input
+          placeholder="Add a username (3–16 letters, digits or _)"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          aria-invalid={invalid || duplicate}
+          maxLength={16}
+        />
+        <Button type="submit" disabled={!trimmed || invalid || duplicate || add.isPending}>
+          {add.isPending ? <Loader2 className="animate-spin" /> : <Plus />}
+          Add
+        </Button>
+      </form>
+      <div className="mb-4 h-4 text-xs text-destructive">
+        {invalid && "Not a valid Minecraft username."}
+        {duplicate && "That account already exists."}
       </div>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Add account</CardTitle>
-          <CardDescription>3–16 letters, digits, or underscores — the same rules vanilla uses.</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <form className="flex gap-2" onSubmit={submit}>
-            <Input
-              placeholder="Username"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              aria-invalid={invalid || duplicate}
-              maxLength={16}
-            />
-            <Button type="submit" disabled={!trimmed || invalid || duplicate || add.isPending}>
-              {add.isPending && <Loader2 className="animate-spin" />}
-              Add
-            </Button>
-          </form>
-          {invalid && <p className="mt-2 text-xs text-destructive">Not a valid Minecraft username.</p>}
-          {duplicate && <p className="mt-2 text-xs text-destructive">That account already exists.</p>}
-        </CardContent>
-      </Card>
-
-      {error && <p className="text-sm text-destructive">{errorMessage(error)}</p>}
+      {error && <p className="mb-3 text-sm text-destructive">{errorMessage(error)}</p>}
       {isLoading && <Skeleton className="h-32" />}
+      {profiles?.length === 0 && <EmptyState>No accounts yet — "Player" is used until you add one.</EmptyState>}
 
-      <div className="space-y-2">
-        {profiles?.map((p) => (
-          <div key={p.name} className="flex items-center gap-3 rounded-lg border bg-card p-3">
-            <PlayerAvatar name={p.name} className="size-9" />
-            <div className="min-w-0 flex-1">
-              <div className="flex items-center gap-2 font-medium">
-                {p.name}
-                {p.is_default && <Badge>Active</Badge>}
-              </div>
-              <div className="truncate font-mono text-xs text-muted-foreground select-text">{p.uuid}</div>
-            </div>
-            <Button
-              variant="ghost"
-              size="icon"
-              title="Play as this account"
-              disabled={p.is_default}
-              onClick={() => setDefault.mutate(p.name)}
+      {profiles && profiles.length > 0 && (
+        <div className="overflow-hidden rounded-lg border bg-card">
+          {profiles.map((p) => (
+            <div
+              key={p.name}
+              className={cn(
+                "group flex items-center gap-3 border-b px-3 py-2 last:border-b-0",
+                p.is_default ? "bg-primary/[0.05]" : "hover:bg-accent/40",
+              )}
             >
-              <Star className={p.is_default ? "fill-primary text-primary" : ""} />
-            </Button>
-            <Button variant="ghost" size="icon" title="Remove" onClick={() => remove.mutate(p.name)}>
-              <Trash2 />
-            </Button>
-          </div>
-        ))}
-      </div>
-    </div>
+              <PlayerAvatar name={p.name} uuid={p.uuid} className="size-9" />
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-2 text-[13px] font-semibold">
+                  {p.name}
+                  {p.is_default && (
+                    <span className="flex items-center gap-1 rounded bg-primary/15 px-1.5 py-px text-[10px] font-semibold tracking-wide text-primary uppercase">
+                      <Check className="size-3" /> Playing as
+                    </span>
+                  )}
+                </div>
+                <div className="truncate font-mono text-[11px] text-muted-foreground select-text">{p.uuid}</div>
+              </div>
+              {!p.is_default && (
+                <Button variant="outline" size="sm" onClick={() => setDefault.mutate(p.name)}>
+                  Use this account
+                </Button>
+              )}
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                className="text-muted-foreground hover:text-destructive"
+                title="Remove"
+                onClick={() => remove.mutate(p.name)}
+              >
+                <Trash2 />
+              </Button>
+            </div>
+          ))}
+        </div>
+      )}
+    </Page>
   );
 }

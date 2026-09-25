@@ -3,6 +3,8 @@ import { createRoot } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createHashRouter, RouterProvider } from "react-router";
 
+import "@fontsource-variable/inter";
+import "@fontsource-variable/jetbrains-mono";
 import "./index.css";
 import { AppShell } from "@/components/app-shell";
 import { AccountsPage } from "@/routes/accounts";

@@ -7,7 +7,7 @@ import type { SearchSort } from "./SearchSort";
  * milestone; nothing outside `bananium-api` may add capability that isn't
  * expressed here first (see PLAN.md's frontend contract).
  */
-export type Command = { "command": "config_show" } | { "command": "config_set", max_concurrent_downloads: number | null, java_path: string | null, } | { "command": "java_list" } | { "command": "screenshot_list", instance: string | null, } | { "command": "screenshot_delete", path: string, } | { "command": "install", version: string, name: string | null, fabric_loader: string | null, } | { "command": "version_list", include_snapshots: boolean, } | { "command": "fabric_loader_list", mc_version: string, } | { "command": "launch", instance: string | null, profile: string | null, dry_run: boolean, } | { "command": "instance_list" } | { "command": "instance_set", instance: string, 
+export type Command = { "command": "config_show" } | { "command": "config_set", max_concurrent_downloads: number | null, java_path: string | null, } | { "command": "java_list" } | { "command": "screenshot_list", instance: string | null, } | { "command": "screenshot_delete", path: string, } | { "command": "install", version: string, name: string | null, fabric_loader: string | null, group: string | null, } | { "command": "version_list", include_snapshots: boolean, } | { "command": "fabric_loader_list", mc_version: string, } | { "command": "launch", instance: string | null, profile: string | null, dry_run: boolean, } | { "command": "instance_list" } | { "command": "instance_set", instance: string, 
 /**
  * `Some(0)` clears the cap back to the JVM default (a real 0 MB
  * cap isn't meaningful, so it doubles as the "unset" sentinel
@@ -25,7 +25,11 @@ jvm_args: Array<string> | null,
  * Per-instance Java executable. `Some("")` clears it back to the
  * global setting/auto-detection; `None` leaves it alone.
  */
-java_path: string | null, } | { "command": "instance_remove", instance: string, } | { "command": "instance_rename", instance: string, new_name: string, } | { "command": "instance_clone", instance: string, new_name: string, } | { "command": "instance_kill", instance: string, } | { "command": "log_list", instance: string, } | { "command": "log_read", instance: string, file: string | null, offset: number, } | { "command": "modrinth_search", query: string, kind: ContentKind, instance: string | null, 
+java_path: string | null, 
+/**
+ * Library group. `Some("")` ungroups it; `None` leaves it alone.
+ */
+group: string | null, } | { "command": "instance_set_icon", instance: string, path: string | null, } | { "command": "instance_remove", instance: string, } | { "command": "instance_rename", instance: string, new_name: string, } | { "command": "instance_clone", instance: string, new_name: string, } | { "command": "instance_kill", instance: string, } | { "command": "log_list", instance: string, } | { "command": "log_read", instance: string, file: string | null, offset: number, } | { "command": "file_list", instance: string, path: string, } | { "command": "file_read", instance: string, path: string, } | { "command": "file_write", instance: string, path: string, text: string, create_new: boolean, } | { "command": "file_create_dir", instance: string, path: string, } | { "command": "file_rename", instance: string, from: string, to: string, } | { "command": "file_delete", instance: string, path: string, } | { "command": "file_import", instance: string, path: string, sources: Array<string>, } | { "command": "modrinth_search", query: string, kind: ContentKind, instance: string | null, 
 /**
  * Modrinth category slugs, each required (AND).
  */

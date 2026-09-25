@@ -271,6 +271,7 @@ async fn submit_edit(app: &mut App, session: &Session) -> bananium_api::Result<(
         ram_mb,
         jvm_args,
         java_path: None,
+        group: None,
     };
     app.status = match session.dispatch(command).await {
         Ok(_) => format!("updated {}", edit.slug),

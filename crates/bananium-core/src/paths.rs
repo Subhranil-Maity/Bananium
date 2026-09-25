@@ -164,6 +164,13 @@ impl Paths {
         self.instance_dir(slug).join("running.toml")
     }
 
+    /// `stats.toml`: last-played time and accumulated playtime. Kept apart
+    /// from `instance.toml` so recording a launch never rewrites the user's
+    /// own config. See `bananium_instance::InstanceStats`.
+    pub fn instance_stats_toml(&self, slug: &str) -> PathBuf {
+        self.instance_dir(slug).join("stats.toml")
+    }
+
     /// The actual game directory passed to the JVM as `--gameDir` /
     /// `${game_directory}` (holds `mods/`, `saves/`, `config/`, ...).
     pub fn instance_minecraft_dir(&self, slug: &str) -> PathBuf {

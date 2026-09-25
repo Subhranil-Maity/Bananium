@@ -1,5 +1,6 @@
 mod content;
 mod download;
+mod files;
 mod instances;
 mod logs;
 mod presets;
@@ -107,9 +108,15 @@ impl Session {
                 version,
                 name,
                 fabric_loader,
+                group,
             } => {
-                self.install_tracked(&version, name.as_deref(), fabric_loader.as_deref())
-                    .await
+                let out = self
+                    .install_tracked(&version, name.as_deref(), fabric_loader.as_deref())
+                    .await?;
+                if let (Some(group), CommandOutput::Installed { instance, .. }) = (group, &out) {
+                    self.instance_set(instance, None, None, None, Some(group))?;
+                }
+                Ok(out)
             }
             Command::VersionList { include_snapshots } => {
                 self.version_list(include_snapshots).await
@@ -129,7 +136,11 @@ impl Session {
                 ram_mb,
                 jvm_args,
                 java_path,
-            } => self.instance_set(&instance, ram_mb, jvm_args, java_path),
+                group,
+            } => self.instance_set(&instance, ram_mb, jvm_args, java_path, group),
+            Command::InstanceSetIcon { instance, path } => {
+                self.instance_set_icon(&instance, path.as_deref())
+            }
             Command::InstanceRemove { instance } => self.instance_remove(&instance),
             Command::InstanceRename { instance, new_name } => {
                 self.instance_rename(&instance, &new_name)
@@ -144,6 +155,22 @@ impl Session {
                 file,
                 offset,
             } => self.log_read(&instance, file.as_deref(), offset),
+            Command::FileList { instance, path } => self.file_list(&instance, &path),
+            Command::FileRead { instance, path } => self.file_read(&instance, &path),
+            Command::FileWrite {
+                instance,
+                path,
+                text,
+                create_new,
+            } => self.file_write(&instance, &path, &text, create_new),
+            Command::FileCreateDir { instance, path } => self.file_create_dir(&instance, &path),
+            Command::FileRename { instance, from, to } => self.file_rename(&instance, &from, &to),
+            Command::FileDelete { instance, path } => self.file_delete(&instance, &path),
+            Command::FileImport {
+                instance,
+                path,
+                sources,
+            } => self.file_import(&instance, &path, &sources),
             Command::ModrinthSearch {
                 query,
                 kind,
@@ -533,7 +560,7 @@ impl Session {
             .stderr(std::process::Stdio::from(stderr_log));
         let mut child = cmd.spawn()?;
         let pid = child.id().unwrap_or(0);
-        instances.mark_running(&slug, pid)?;
+        instances.mark_running(&slug, pid, Some(&log_path))?;
 
         // The caller gets the pid back immediately; this task outlives the
         // command. For a long-lived frontend (the desktop app, the TUI) it

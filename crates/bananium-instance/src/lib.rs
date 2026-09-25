@@ -8,7 +8,7 @@ pub mod content;
 pub mod error;
 pub mod presets;
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use bananium_core::Paths;
 use serde::{Deserialize, Serialize};
@@ -59,7 +59,27 @@ pub struct InstanceConfig {
     /// JVM flags rather than game arguments.
     #[serde(default)]
     pub jvm_args: Vec<String>,
+    /// User-chosen group the instance is filed under in a frontend's
+    /// library ("Modded", "Servers", ...); `None` is ungrouped.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub group: Option<String>,
 }
+
+/// The contents of an instance's `stats.toml`: play history, recorded by
+/// launches rather than edited by the user.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct InstanceStats {
+    /// When the instance was last launched (Unix seconds).
+    #[serde(default)]
+    pub last_played_unix: Option<u64>,
+    /// Total time the game has been running, summed over every launch.
+    #[serde(default)]
+    pub playtime_secs: u64,
+}
+
+/// Image extensions accepted by [`InstanceStore::set_icon`] — the formats a
+/// webview can display directly.
+const ICON_EXTENSIONS: &[&str] = &["png", "jpg", "jpeg", "gif", "webp"];
 
 /// True if `name` is safe to use both as a display name and, after
 /// [`InstanceStore::slugify`], as an instance directory name: non-empty and
@@ -135,6 +155,7 @@ impl InstanceStore {
             java_path: None,
             ram_mb: None,
             jvm_args: Vec::new(),
+            group: None,
         };
         self.save(&slug, &cfg)?;
         std::fs::create_dir_all(self.paths.instance_minecraft_dir(&slug))?;
@@ -218,18 +239,25 @@ impl InstanceStore {
     /// process per command, so there's nothing to watch with — instead
     /// staleness is re-checked and swept here on every call, which is the
     /// only point that actually needs an accurate answer.
+    ///
+    /// Sweeping a dead run also credits its playtime. Nobody saw the exit
+    /// happen, so the end time is estimated as the launch log's last write:
+    /// the JVM's stdout/stderr go there until the process dies. Removing
+    /// the run from `running.toml` is what makes each run count once — a
+    /// long-lived session's exact [`InstanceStore::mark_exited`] credits
+    /// only runs that are still listed, and so does this sweep.
     pub fn running_pids(&self, slug: &str) -> Result<Vec<u32>> {
-        let path = self.paths.instance_running_toml(slug);
-        let state: RunningState = match std::fs::read_to_string(&path) {
-            Ok(text) => toml::from_str(&text).unwrap_or_default(),
-            Err(_) => RunningState::default(),
-        };
-        let alive: Vec<u32> = state
-            .pids
-            .into_iter()
-            .filter(|&pid| is_pid_alive(pid))
-            .collect();
-        Ok(alive)
+        let runs = self.read_running(slug);
+        let (alive, dead): (Vec<Run>, Vec<Run>) =
+            runs.into_iter().partition(|run| is_pid_alive(run.pid));
+        if !dead.is_empty() && self.paths.instance_dir(slug).is_dir() {
+            let swept: u64 = dead.iter().map(Run::estimated_secs).sum();
+            self.write_running(slug, &alive)?;
+            if swept > 0 {
+                self.add_playtime(slug, swept)?;
+            }
+        }
+        Ok(alive.into_iter().map(|run| run.pid).collect())
     }
 
     /// Whether any pid recorded for `slug` is still alive — the
@@ -241,36 +269,154 @@ impl InstanceStore {
 
     /// Record `pid` as running `slug`, first pruning any pids that are no
     /// longer alive (so a crashed-and-relaunched instance doesn't
-    /// accumulate stale entries forever).
-    pub fn mark_running(&self, slug: &str, pid: u32) -> Result<()> {
-        let mut pids = self.running_pids(slug)?;
-        pids.push(pid);
-        self.write_running(slug, pids)
+    /// accumulate stale entries forever). Also stamps the instance's
+    /// last-played time. `log` is the file the process's output goes to,
+    /// which lets a later sweep estimate when it exited.
+    pub fn mark_running(&self, slug: &str, pid: u32, log: Option<&Path>) -> Result<()> {
+        self.running_pids(slug)?;
+        let mut runs = self.read_running(slug);
+        let now = now_unix();
+        runs.push(Run {
+            pid,
+            started_unix: Some(now),
+            log: log.map(Path::to_path_buf),
+        });
+        self.write_running(slug, &runs)?;
+        let mut stats = self.stats(slug);
+        stats.last_played_unix = Some(now);
+        self.save_stats(slug, &stats)
     }
 
-    /// Forget `pid` for `slug` once its process is known to have exited.
-    /// Called by a long-lived frontend (one `Session` that outlives the
-    /// game) so the running state is exact immediately, rather than waiting
-    /// for the lazy sweep in [`InstanceStore::running_pids`] — which also
-    /// guards against the OS reusing the pid for an unrelated process.
+    /// Forget `pid` for `slug` once its process is known to have exited,
+    /// crediting the exact time it ran. Called by a long-lived frontend
+    /// (one `Session` that outlives the game) so the running state is exact
+    /// immediately, rather than waiting for the lazy sweep in
+    /// [`InstanceStore::running_pids`] — which also guards against the OS
+    /// reusing the pid for an unrelated process.
     pub fn mark_exited(&self, slug: &str, pid: u32) -> Result<()> {
         if !self.paths.instance_dir(slug).is_dir() {
             // Deleted (or renamed) while running; nothing left to update.
             return Ok(());
         }
-        let pids = self
-            .running_pids(slug)?
-            .into_iter()
-            .filter(|&p| p != pid)
-            .collect();
-        self.write_running(slug, pids)
+        let mut runs = self.read_running(slug);
+        let Some(index) = runs.iter().position(|run| run.pid == pid) else {
+            // Already swept (and credited) by `running_pids`.
+            return Ok(());
+        };
+        let run = runs.remove(index);
+        self.write_running(slug, &runs)?;
+        if let Some(started) = run.started_unix {
+            self.add_playtime(slug, now_unix().saturating_sub(started))?;
+        }
+        Ok(())
     }
 
-    fn write_running(&self, slug: &str, pids: Vec<u32>) -> Result<()> {
+    /// Every recorded run, dead or alive; unreadable state reads as none.
+    fn read_running(&self, slug: &str) -> Vec<Run> {
+        let path = self.paths.instance_running_toml(slug);
+        let state: RunningState = match std::fs::read_to_string(&path) {
+            Ok(text) => toml::from_str(&text).unwrap_or_default(),
+            Err(_) => RunningState::default(),
+        };
+        state.into_runs()
+    }
+
+    fn write_running(&self, slug: &str, runs: &[Run]) -> Result<()> {
         let path = self.paths.instance_running_toml(slug);
         std::fs::create_dir_all(self.paths.instance_dir(slug))?;
-        std::fs::write(&path, toml::to_string_pretty(&RunningState { pids })?)?;
+        let state = RunningState {
+            pids: Vec::new(),
+            runs: runs.to_vec(),
+        };
+        std::fs::write(&path, toml::to_string_pretty(&state)?)?;
         Ok(())
+    }
+
+    /// `slug`'s play history; a missing or unreadable `stats.toml` reads
+    /// as never played rather than an error, since it's only ever display
+    /// data.
+    pub fn stats(&self, slug: &str) -> InstanceStats {
+        std::fs::read_to_string(self.paths.instance_stats_toml(slug))
+            .ok()
+            .and_then(|text| toml::from_str(&text).ok())
+            .unwrap_or_default()
+    }
+
+    fn save_stats(&self, slug: &str, stats: &InstanceStats) -> Result<()> {
+        std::fs::create_dir_all(self.paths.instance_dir(slug))?;
+        std::fs::write(
+            self.paths.instance_stats_toml(slug),
+            toml::to_string_pretty(stats)?,
+        )?;
+        Ok(())
+    }
+
+    /// Add `secs` to `slug`'s total playtime.
+    pub fn add_playtime(&self, slug: &str, secs: u64) -> Result<()> {
+        let mut stats = self.stats(slug);
+        stats.playtime_secs = stats.playtime_secs.saturating_add(secs);
+        self.save_stats(slug, &stats)
+    }
+
+    /// The instance's custom icon, if one is set. Stored as
+    /// `icon-<unix millis>.<ext>` so that each change gets a new path: a
+    /// webview caches images by URL and would otherwise keep showing the
+    /// old one.
+    pub fn icon(&self, slug: &str) -> Option<PathBuf> {
+        std::fs::read_dir(self.paths.instance_dir(slug))
+            .ok()?
+            .filter_map(|entry| entry.ok())
+            .map(|entry| entry.path())
+            .find(|path| is_icon_file(path))
+    }
+
+    /// Replace `slug`'s icon with a copy of the image at `source`, or clear
+    /// it when `source` is `None`.
+    pub fn set_icon(&self, slug: &str, source: Option<&Path>) -> Result<()> {
+        self.resolve(Some(slug))?;
+        let new_icon = match source {
+            Some(source) => {
+                let ext = source
+                    .extension()
+                    .and_then(|e| e.to_str())
+                    .map(str::to_ascii_lowercase)
+                    .filter(|e| ICON_EXTENSIONS.contains(&e.as_str()))
+                    .ok_or_else(|| Error::UnsupportedIcon(source.display().to_string()))?;
+                let dest = self
+                    .paths
+                    .instance_dir(slug)
+                    .join(format!("icon-{}.{ext}", now_millis()));
+                std::fs::copy(source, &dest)?;
+                Some(dest)
+            }
+            None => None,
+        };
+        for entry in std::fs::read_dir(self.paths.instance_dir(slug))? {
+            let path = entry?.path();
+            if is_icon_file(&path) && Some(&path) != new_icon.as_ref() {
+                std::fs::remove_file(path)?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Enabled mods in `slug`'s `mods/` folder, counted straight from the
+    /// directory — cheap enough for every row of an instance list, unlike a
+    /// full [`ContentStore`] listing.
+    pub fn mod_count(&self, slug: &str) -> u32 {
+        let Ok(entries) = std::fs::read_dir(self.paths.instance_minecraft_dir(slug).join("mods"))
+        else {
+            return 0;
+        };
+        entries
+            .filter_map(|entry| entry.ok())
+            .filter(|entry| {
+                entry
+                    .file_name()
+                    .to_str()
+                    .is_some_and(|name| name.to_ascii_lowercase().ends_with(".jar"))
+            })
+            .count() as u32
     }
 
     /// Delete an instance and everything in it (worlds, mods, logs).
@@ -332,6 +478,11 @@ impl InstanceStore {
         if lock.is_file() {
             std::fs::copy(&lock, self.paths.instance_lock(&new_slug))?;
         }
+        if let Some(icon) = self.icon(slug) {
+            if let Some(file_name) = icon.file_name() {
+                std::fs::copy(&icon, self.paths.instance_dir(&new_slug).join(file_name))?;
+            }
+        }
         cfg.name = new_name.to_string();
         self.save(&new_slug, &cfg)?;
         Ok(new_slug)
@@ -358,10 +509,77 @@ fn copy_dir_recursive(from: &std::path::Path, to: &std::path::Path) -> Result<()
 }
 
 /// On-disk shape of `running.toml` — see [`InstanceStore::running_pids`].
+/// `pids` is the older format (bare pids, no start time), still read so an
+/// upgrade mid-game doesn't lose track of a running instance; it's never
+/// written any more.
 #[derive(Debug, Default, Serialize, Deserialize)]
 struct RunningState {
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pids: Vec<u32>,
+    #[serde(default)]
+    runs: Vec<Run>,
+}
+
+impl RunningState {
+    fn into_runs(self) -> Vec<Run> {
+        let legacy = self.pids.into_iter().map(|pid| Run {
+            pid,
+            started_unix: None,
+            log: None,
+        });
+        self.runs.into_iter().chain(legacy).collect()
+    }
+}
+
+/// One launched game process.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct Run {
+    pid: u32,
+    #[serde(default)]
+    started_unix: Option<u64>,
+    /// Where the process's stdout/stderr go.
+    #[serde(default)]
+    log: Option<PathBuf>,
+}
+
+impl Run {
+    /// How long a run that exited unobserved probably lasted: from its
+    /// start to its log's last write. Zero when either is unknown.
+    fn estimated_secs(&self) -> u64 {
+        let (Some(started), Some(log)) = (self.started_unix, &self.log) else {
+            return 0;
+        };
+        std::fs::metadata(log)
+            .and_then(|m| m.modified())
+            .ok()
+            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|d| d.as_secs().saturating_sub(started))
+            .unwrap_or(0)
+    }
+}
+
+fn now_unix() -> u64 {
+    now_millis() / 1000
+}
+
+fn now_millis() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or_default()
+}
+
+/// Whether `path` is an icon written by [`InstanceStore::set_icon`].
+fn is_icon_file(path: &Path) -> bool {
+    let name_ok = path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .is_some_and(|s| s.starts_with("icon-"));
+    let ext_ok = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .is_some_and(|e| ICON_EXTENSIONS.contains(&e.to_ascii_lowercase().as_str()));
+    name_ok && ext_ok && path.is_file()
 }
 
 /// Whether `pid` currently identifies a live process. Linux checks
@@ -510,8 +728,108 @@ mod tests {
         // A pid far past Linux's real pid_max can never correspond to a
         // live process, so this exercises the "recorded but dead" path
         // deterministically instead of racing a real child process.
-        store.mark_running(&slug, u32::MAX).unwrap();
+        store.mark_running(&slug, u32::MAX, None).unwrap();
         assert!(!store.is_running(&slug).unwrap());
+        assert!(store.stats(&slug).last_played_unix.is_some());
+    }
+
+    #[test]
+    fn legacy_running_toml_still_parses() {
+        let dir = tempfile::tempdir().unwrap();
+        let paths = Paths::at(dir.path());
+        let store = InstanceStore::new(paths.clone());
+        let slug = store.create_named("1.21.1", Some("main")).unwrap();
+        let me = std::process::id();
+        std::fs::write(
+            paths.instance_running_toml(&slug),
+            format!("pids = [{me}]\n"),
+        )
+        .unwrap();
+        let runs = store.read_running(&slug);
+        assert_eq!(runs.len(), 1);
+        assert_eq!(runs[0].pid, me);
+        assert_eq!(runs[0].started_unix, None);
+    }
+
+    #[test]
+    fn sweeping_a_dead_run_credits_playtime_up_to_its_logs_last_write() {
+        let dir = tempfile::tempdir().unwrap();
+        let paths = Paths::at(dir.path());
+        let store = InstanceStore::new(paths.clone());
+        let slug = store.create_named("1.21.1", Some("main")).unwrap();
+        let log = paths.instance_dir(&slug).join("launch.log");
+        std::fs::write(&log, "done").unwrap();
+        let log_written = now_unix();
+        let run = Run {
+            pid: u32::MAX,
+            started_unix: Some(log_written - 600),
+            log: Some(log),
+        };
+        store.write_running(&slug, &[run]).unwrap();
+
+        assert!(store.running_pids(&slug).unwrap().is_empty());
+        let played = store.stats(&slug).playtime_secs;
+        assert!((600..=602).contains(&played), "played {played}s");
+
+        // Swept runs are gone, so a second sweep (or a late `mark_exited`)
+        // can't count the same run again.
+        store.running_pids(&slug).unwrap();
+        store.mark_exited(&slug, u32::MAX).unwrap();
+        assert_eq!(store.stats(&slug).playtime_secs, played);
+    }
+
+    #[test]
+    fn stats_round_trip_and_default_to_never_played() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = InstanceStore::new(Paths::at(dir.path()));
+        let slug = store.create_named("1.21.1", Some("main")).unwrap();
+        assert_eq!(store.stats(&slug), InstanceStats::default());
+        store.add_playtime(&slug, 90).unwrap();
+        store.add_playtime(&slug, 30).unwrap();
+        assert_eq!(store.stats(&slug).playtime_secs, 120);
+    }
+
+    #[test]
+    fn set_icon_replaces_and_clears_and_follows_a_clone() {
+        let dir = tempfile::tempdir().unwrap();
+        let paths = Paths::at(dir.path());
+        let store = InstanceStore::new(paths.clone());
+        let slug = store.create_named("1.21.1", Some("main")).unwrap();
+        let png = dir.path().join("pic.PNG");
+        std::fs::write(&png, "png").unwrap();
+
+        assert!(store.icon(&slug).is_none());
+        store.set_icon(&slug, Some(&png)).unwrap();
+        let icon = store.icon(&slug).unwrap();
+        assert_eq!(icon.extension().unwrap(), "png");
+
+        let copy = store.clone_instance(&slug, "copy").unwrap();
+        assert!(store.icon(&copy).is_some());
+
+        let txt = dir.path().join("notes.txt");
+        std::fs::write(&txt, "x").unwrap();
+        assert!(matches!(
+            store.set_icon(&slug, Some(&txt)),
+            Err(Error::UnsupportedIcon(_))
+        ));
+        assert_eq!(store.icon(&slug), Some(icon));
+
+        store.set_icon(&slug, None).unwrap();
+        assert!(store.icon(&slug).is_none());
+    }
+
+    #[test]
+    fn mod_count_counts_enabled_jars_only() {
+        let dir = tempfile::tempdir().unwrap();
+        let paths = Paths::at(dir.path());
+        let store = InstanceStore::new(paths.clone());
+        let slug = store.create_named("1.21.1", Some("main")).unwrap();
+        assert_eq!(store.mod_count(&slug), 0);
+        let mods = paths.instance_minecraft_dir(&slug).join("mods");
+        std::fs::create_dir_all(&mods).unwrap();
+        std::fs::write(mods.join("a.jar"), "").unwrap();
+        std::fs::write(mods.join("b.jar.disabled"), "").unwrap();
+        assert_eq!(store.mod_count(&slug), 1);
     }
 
     #[cfg(any(target_os = "linux", windows))]
@@ -523,11 +841,14 @@ mod tests {
 
         let me = std::process::id();
         assert!(is_pid_alive(me));
-        store.mark_running(&slug, me).unwrap();
+        store.mark_running(&slug, me, None).unwrap();
         assert!(store.is_running(&slug).unwrap());
 
         store.mark_exited(&slug, me).unwrap();
         assert!(!store.is_running(&slug).unwrap());
+        // Credited exactly once, by `mark_exited`.
+        store.mark_exited(&slug, me).unwrap();
+        assert!(store.stats(&slug).playtime_secs < 5);
     }
 
     #[test]

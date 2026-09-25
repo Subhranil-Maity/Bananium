@@ -40,6 +40,20 @@ pub struct InstanceSummary {
     /// Whether `bananium_instance::InstanceStore::is_running` currently
     /// sees a live pid recorded for this instance.
     pub running: bool,
+    /// User-chosen library group; `None` is ungrouped.
+    pub group: Option<String>,
+    /// Custom icon image, displayable through the desktop app's asset
+    /// protocol. `None` means the frontend draws its own placeholder.
+    #[cfg_attr(feature = "ts", ts(type = "string | null"))]
+    pub icon_path: Option<PathBuf>,
+    /// Last launch time (Unix seconds); `None` if never played.
+    #[cfg_attr(feature = "ts", ts(type = "number | null"))]
+    pub last_played_unix: Option<u64>,
+    /// Total time played across every launch.
+    #[cfg_attr(feature = "ts", ts(type = "number"))]
+    pub playtime_secs: u64,
+    /// Enabled mods in `mods/`.
+    pub mod_count: u32,
 }
 
 /// One Modrinth search result.
@@ -194,6 +208,26 @@ pub struct LogFile {
     pub modified_unix: u64,
 }
 
+/// One entry of a folder in an instance's game directory, as listed by
+/// `Command::FileList`.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
+pub struct FileEntry {
+    pub name: String,
+    /// Relative to the game directory, `/`-separated; pass back to the
+    /// other `File*` commands.
+    pub path: String,
+    pub is_dir: bool,
+    /// Bytes; 0 for folders.
+    #[cfg_attr(feature = "ts", ts(type = "number"))]
+    pub size: u64,
+    #[cfg_attr(feature = "ts", ts(type = "number"))]
+    pub modified_unix: u64,
+    /// The real path, for "open with the system" / "show in folder".
+    #[cfg_attr(feature = "ts", ts(type = "string"))]
+    pub abs_path: PathBuf,
+}
+
 /// The result of a successfully dispatched `Command`. One variant per
 /// `Command` variant.
 #[derive(Debug, Clone, Serialize)]
@@ -255,6 +289,26 @@ pub enum CommandOutput {
     LogListed {
         instance: String,
         logs: Vec<LogFile>,
+    },
+    FileListed {
+        instance: String,
+        /// The listed folder, normalised (no leading/trailing `/`).
+        path: String,
+        entries: Vec<FileEntry>,
+    },
+    FileContents {
+        path: String,
+        text: String,
+    },
+    /// A file or folder was written, created, or renamed to `path`.
+    FileWritten {
+        path: String,
+    },
+    FileDeleted {
+        path: String,
+    },
+    FileImported {
+        count: u32,
     },
     LogChunk {
         /// Which log was read; `None` when the instance has no logs yet.

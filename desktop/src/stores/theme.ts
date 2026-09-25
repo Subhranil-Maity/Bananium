@@ -1,15 +1,17 @@
 import { create } from "zustand";
 
-/** "banana" is the default light theme with a yellow accent; "dark" is its dark twin. */
-export type Theme = "banana" | "dark";
+/** Dark is the default; light is the optional alternative. */
+export type Theme = "dark" | "light";
 
 const STORAGE_KEY = "bananium.theme";
 
 function load(): Theme {
   try {
-    return localStorage.getItem(STORAGE_KEY) === "dark" ? "dark" : "banana";
+    // "banana" is what older builds stored for the light theme.
+    const stored = localStorage.getItem(STORAGE_KEY);
+    return stored === "light" || stored === "banana" ? "light" : "dark";
   } catch {
-    return "banana";
+    return "dark";
   }
 }
 

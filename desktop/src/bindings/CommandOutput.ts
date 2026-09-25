@@ -3,6 +3,7 @@ import type { Config } from "./Config";
 import type { ContentEntry } from "./ContentEntry";
 import type { ContentUpdateInfo } from "./ContentUpdateInfo";
 import type { FabricLoaderSummary } from "./FabricLoaderSummary";
+import type { FileEntry } from "./FileEntry";
 import type { InstanceSummary } from "./InstanceSummary";
 import type { JavaInstall } from "./JavaInstall";
 import type { LogFile } from "./LogFile";
@@ -35,7 +36,11 @@ instance: string, } | { "result": "instance_cloned", source: string,
 /**
  * The new instance's slug.
  */
-instance: string, } | { "result": "instance_killed", instance: string, } | { "result": "log_listed", instance: string, logs: Array<LogFile>, } | { "result": "log_chunk", 
+instance: string, } | { "result": "instance_killed", instance: string, } | { "result": "log_listed", instance: string, logs: Array<LogFile>, } | { "result": "file_listed", instance: string, 
+/**
+ * The listed folder, normalised (no leading/trailing `/`).
+ */
+path: string, entries: Array<FileEntry>, } | { "result": "file_contents", path: string, text: string, } | { "result": "file_written", path: string, } | { "result": "file_deleted", path: string, } | { "result": "file_imported", count: number, } | { "result": "log_chunk", 
 /**
  * Which log was read; `None` when the instance has no logs yet.
  */

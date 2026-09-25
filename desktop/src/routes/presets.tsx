@@ -6,9 +6,7 @@ import { toast } from "sonner";
 
 import type { ContentKind } from "@/bindings/ContentKind";
 import type { Preset } from "@/bindings/Preset";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Dialog,
   DialogContent,
@@ -28,6 +26,7 @@ import {
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
+import { EmptyState, Page, PageHeader } from "@/components/page";
 import { useInstances } from "@/hooks/use-instances";
 import { PRESETS_KEY, useApplyPreset, usePresets, useSavePreset } from "@/hooks/use-presets";
 import { errorMessage, run } from "@/lib/api";
@@ -163,72 +162,93 @@ function PresetCard({ preset }: { preset: Preset }) {
   );
 
   return (
-    <Card className="gap-3">
-      <CardHeader>
-        {renaming !== null ? (
-          <form
-            className="flex gap-2"
-            onSubmit={(e) => {
-              e.preventDefault();
-              if (validPresetName(renaming)) rename.mutate(renaming);
-            }}
-          >
-            <Input autoFocus value={renaming} onChange={(e) => setRenaming(e.target.value)} />
-            <Button type="submit" size="sm" disabled={!validPresetName(renaming)}>
-              Save
-            </Button>
-          </form>
-        ) : (
-          <CardTitle className="flex items-center gap-2">
-            <span className="truncate">{preset.name}</span>
-            <Badge variant="secondary">
-              {preset.loader === "fabric" ? "Fabric" : "Vanilla"} {preset.mc_version}
-            </Badge>
-          </CardTitle>
-        )}
-        <CardDescription>{counts.map(([label, n]) => `${n} ${label.toLowerCase()}`).join(" · ") || "Empty"}</CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-3">
-        <div className="flex flex-wrap gap-1.5">
-          {preset.entries.map((e) => (
-            <span key={e.project_id} className="flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-xs">
-              {e.icon_url && <img src={e.icon_url} alt="" className="size-4 rounded-sm" />}
-              {e.title}
-            </span>
-          ))}
+    <div className="group flex flex-col rounded-lg border bg-card">
+      <div className="flex items-start gap-2 border-b px-3 py-2.5">
+        <div className="min-w-0 flex-1">
+          {renaming !== null ? (
+            <form
+              className="flex gap-2"
+              onSubmit={(e) => {
+                e.preventDefault();
+                if (validPresetName(renaming)) rename.mutate(renaming);
+              }}
+            >
+              <Input autoFocus value={renaming} onChange={(e) => setRenaming(e.target.value)} />
+              <Button type="submit" size="sm" disabled={!validPresetName(renaming)}>
+                Save
+              </Button>
+              <Button type="button" size="sm" variant="ghost" onClick={() => setRenaming(null)}>
+                Cancel
+              </Button>
+            </form>
+          ) : (
+            <div className="flex items-center gap-2">
+              <span className="truncate text-[13px] font-semibold">{preset.name}</span>
+              <span className="shrink-0 rounded border px-1.5 py-px text-[10px] text-muted-foreground">
+                {preset.loader === "fabric" ? "Fabric" : "Vanilla"} {preset.mc_version}
+              </span>
+            </div>
+          )}
+          <div className="mt-0.5 text-xs text-muted-foreground tabular-nums">
+            {counts.map(([label, n]) => `${n} ${label.toLowerCase()}`).join(" · ") || "Empty"}
+          </div>
         </div>
-        <div className="flex gap-2">
-          <Select value={target} onValueChange={setTarget}>
-            <SelectTrigger className="flex-1">
-              <SelectValue placeholder="Apply to instance…" />
-            </SelectTrigger>
-            <SelectContent>
-              {instances?.map((i) => (
-                <SelectItem key={i.slug} value={i.slug}>
-                  {i.name} · {i.mc_version}
-                  {i.loader === "fabric" ? " · Fabric" : ""}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <Button disabled={!target || apply.isPending} onClick={() => apply.mutate({ preset: preset.name, instance: target })}>
-            {apply.isPending ? <Loader2 className="animate-spin" /> : <Download />}
-            Apply
-          </Button>
-        </div>
-        <div className="flex justify-end gap-1">
-          <Button variant="ghost" size="icon" title="Rename" onClick={() => setRenaming(preset.name)}>
+        <div className="flex gap-0.5 opacity-60 transition-opacity group-hover:opacity-100">
+          <Button variant="ghost" size="icon-sm" title="Rename" onClick={() => setRenaming(preset.name)}>
             <Pencil />
           </Button>
-          <Button variant="ghost" size="icon" title="Export" onClick={() => void exportPreset()}>
+          <Button variant="ghost" size="icon-sm" title="Export" onClick={() => void exportPreset()}>
             <FileDown />
           </Button>
-          <Button variant="ghost" size="icon" title="Delete" onClick={() => remove.mutate()}>
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            className="hover:text-destructive"
+            title="Delete"
+            onClick={() => remove.mutate()}
+          >
             <Trash2 />
           </Button>
         </div>
-      </CardContent>
-    </Card>
+      </div>
+      <div className="flex flex-1 flex-wrap content-start gap-1 px-3 py-2.5">
+        {preset.entries.map((e) => (
+          <span
+            key={e.project_id}
+            className="flex items-center gap-1.5 rounded bg-muted px-1.5 py-0.5 text-[11px]"
+            title={e.title}
+          >
+            {e.icon_url ? (
+              <img src={e.icon_url} alt="" className="size-3.5 rounded-sm" />
+            ) : (
+              <span className="size-3.5 rounded-sm bg-background" />
+            )}
+            <span className="max-w-40 truncate">{e.title}</span>
+          </span>
+        ))}
+      </div>
+      <div className="flex gap-2 border-t bg-muted/20 px-3 py-2">
+        <Select value={target} onValueChange={setTarget}>
+          <SelectTrigger className="flex-1">
+            <SelectValue placeholder="Apply to instance…" />
+          </SelectTrigger>
+          <SelectContent>
+            {instances?.map((i) => (
+              <SelectItem key={i.slug} value={i.slug}>
+                {i.name}
+                <span className="text-muted-foreground">
+                  {i.loader === "fabric" ? "Fabric" : "Vanilla"} {i.mc_version}
+                </span>
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <Button disabled={!target || apply.isPending} onClick={() => apply.mutate({ preset: preset.name, instance: target })}>
+          {apply.isPending ? <Loader2 className="animate-spin" /> : <Download />}
+          Apply
+        </Button>
+      </div>
+    </div>
   );
 }
 
@@ -251,37 +271,26 @@ export function PresetsPage() {
   }
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between gap-2">
-        <div>
-          <h1 className="text-2xl font-semibold">Presets</h1>
-          <p className="text-sm text-muted-foreground">
-            Reusable sets of mods, resource packs and shaders. Applying one picks the right version of each project for
-            the target instance.
-          </p>
-        </div>
-        <div className="flex gap-2">
-          <Button variant="outline" onClick={() => void importPreset()}>
-            <FileUp /> Import
-          </Button>
-          <Button onClick={() => setSaving(true)}>
-            <Plus /> New preset
-          </Button>
-        </div>
-      </div>
-      {error && <p className="text-sm text-destructive">{errorMessage(error)}</p>}
+    <Page>
+      <PageHeader title="Presets" meta="Reusable content sets — versions are re-picked for each target instance">
+        <Button variant="outline" onClick={() => void importPreset()}>
+          <FileUp /> Import
+        </Button>
+        <Button onClick={() => setSaving(true)}>
+          <Plus /> New preset
+        </Button>
+      </PageHeader>
+      {error && <p className="mb-3 text-sm text-destructive">{errorMessage(error)}</p>}
       {isLoading && <Skeleton className="h-40" />}
       {presets?.length === 0 && (
-        <div className="rounded-lg border border-dashed p-12 text-center text-muted-foreground">
-          No presets yet. Set up an instance the way you like it, then save it as a preset.
-        </div>
+        <EmptyState>No presets yet. Set up an instance the way you like it, then save it as a preset.</EmptyState>
       )}
-      <div className="grid grid-cols-[repeat(auto-fill,minmax(340px,1fr))] gap-4">
+      <div className="grid grid-cols-[repeat(auto-fill,minmax(360px,1fr))] gap-2">
         {presets?.map((p) => (
           <PresetCard key={p.name} preset={p} />
         ))}
       </div>
       <SavePresetDialog open={saving} onOpenChange={setSaving} />
-    </div>
+    </Page>
   );
 }

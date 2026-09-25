@@ -55,6 +55,14 @@ pub enum Error {
     Incompatible(String),
     #[error("{0:?} isn't a screenshot")]
     NotAScreenshot(String),
+    #[error("{0:?} isn't a path inside the instance's game folder")]
+    InvalidPath(String),
+    #[error("{0:?} is too large to edit here (over 2 MiB); open it in an external editor")]
+    FileTooLarge(String),
+    #[error("{0:?} isn't a text file")]
+    NotText(String),
+    #[error("{0:?} already exists")]
+    FileExists(String),
 }
 
 /// Generates a `From<$source> for Error` that boxes on the way in. Written

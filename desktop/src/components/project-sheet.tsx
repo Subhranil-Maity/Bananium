@@ -5,7 +5,6 @@ import remarkGfm from "remark-gfm";
 import { openUrl } from "@tauri-apps/plugin-opener";
 
 import type { ContentKind } from "@/bindings/ContentKind";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -13,6 +12,13 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useInstallContent } from "@/hooks/use-content";
 import { errorMessage, run } from "@/lib/api";
 import { formatCount } from "@/lib/content";
+import { cn } from "@/lib/utils";
+
+const VERSION_TYPE: Record<string, string> = {
+  release: "bg-success/15 text-success",
+  beta: "bg-warning/15 text-warning",
+  alpha: "bg-destructive/15 text-destructive",
+};
 
 /** Full Modrinth project view: description, gallery, versions with install buttons. */
 export function ProjectSheet({
@@ -50,44 +56,49 @@ export function ProjectSheet({
   const p = project.data;
   const links = p
     ? ([
+        ["Modrinth", `https://modrinth.com/project/${p.slug ?? p.id}`],
         ["Source", p.source_url],
         ["Issues", p.issues_url],
         ["Wiki", p.wiki_url],
         ["Discord", p.discord_url],
-        ["Modrinth", `https://modrinth.com/project/${p.slug ?? p.id}`],
       ].filter(([, url]) => url) as [string, string][])
     : [];
 
   return (
     <Sheet open={projectId !== null} onOpenChange={onOpenChange}>
       <SheetContent className="w-full gap-0 overflow-y-auto sm:max-w-2xl">
-        <SheetHeader>
+        <SheetHeader className="border-b p-5">
           {p ? (
-            <div className="flex items-start gap-3">
-              {p.icon_url && <img src={p.icon_url} alt="" className="size-14 rounded-lg" />}
-              <div className="min-w-0">
-                <SheetTitle className="text-xl">{p.title}</SheetTitle>
-                <SheetDescription>{p.description}</SheetDescription>
-                <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
+            <div className="flex items-start gap-4">
+              {p.icon_url ? (
+                <img src={p.icon_url} alt="" className="size-20 shrink-0 rounded-xl bg-muted" />
+              ) : (
+                <div className="size-20 shrink-0 rounded-xl bg-muted" />
+              )}
+              <div className="min-w-0 space-y-1">
+                <SheetTitle className="text-lg leading-tight">{p.title}</SheetTitle>
+                <SheetDescription className="text-[13px]">{p.description}</SheetDescription>
+                <div className="flex flex-wrap items-center gap-3 pt-1 text-xs text-muted-foreground tabular-nums">
                   <span className="flex items-center gap-1">
-                    <Download className="size-3" /> {formatCount(p.downloads)}
+                    <Download className="size-3.5" />
+                    <span className="font-semibold text-foreground">{formatCount(p.downloads)}</span> downloads
                   </span>
                   <span className="flex items-center gap-1">
-                    <Heart className="size-3" /> {formatCount(p.followers)}
+                    <Heart className="size-3.5" /> {formatCount(p.followers)}
                   </span>
-                  {p.license && <span>{p.license}</span>}
+                  {p.license && <span className="rounded border px-1.5 py-px text-[11px]">{p.license}</span>}
                 </div>
               </div>
             </div>
           ) : (
             <>
-              <SheetTitle>Loading…</SheetTitle>
-              <Skeleton className="h-14" />
+              <SheetTitle className="sr-only">Loading…</SheetTitle>
+              <Skeleton className="h-20" />
             </>
           )}
           {project.error && <p className="text-sm text-destructive">{errorMessage(project.error)}</p>}
           {p && (
-            <div className="flex flex-wrap gap-2 pt-2">
+            <div className="flex flex-wrap gap-1.5 pt-3">
               {links.map(([label, url]) => (
                 <Button key={label} variant="outline" size="sm" onClick={() => void openUrl(url)}>
                   <ExternalLink /> {label}
@@ -98,50 +109,71 @@ export function ProjectSheet({
         </SheetHeader>
 
         {p && (
-          <Tabs defaultValue="versions" className="px-4 pb-6">
-            <TabsList>
-              <TabsTrigger value="versions">Versions</TabsTrigger>
-              <TabsTrigger value="description">Description</TabsTrigger>
-              {p.gallery.length > 0 && <TabsTrigger value="gallery">Gallery</TabsTrigger>}
+          <Tabs defaultValue="versions" className="gap-3 px-5 py-4">
+            <TabsList variant="line" className="h-8 gap-4 p-0">
+              <TabsTrigger value="versions" className="flex-none px-0.5 data-[state=active]:after:bg-primary">
+                Versions {versions.data && <span className="text-xs text-muted-foreground">{versions.data.length}</span>}
+              </TabsTrigger>
+              <TabsTrigger value="description" className="flex-none px-0.5 data-[state=active]:after:bg-primary">
+                Description
+              </TabsTrigger>
+              {p.gallery.length > 0 && (
+                <TabsTrigger value="gallery" className="flex-none px-0.5 data-[state=active]:after:bg-primary">
+                  Gallery
+                </TabsTrigger>
+              )}
             </TabsList>
 
-            <TabsContent value="versions" className="space-y-1">
+            <TabsContent value="versions">
               {!instance && (
-                <p className="py-2 text-sm text-muted-foreground">
-                  Choose a target instance on the Browse page to install.
+                <p className="mb-2 rounded-md border border-dashed px-3 py-2 text-xs text-muted-foreground">
+                  Pick an instance under "Install to" on the Browse page to install a specific version.
                 </p>
               )}
               {versions.isLoading && <Skeleton className="h-40" />}
-              {versions.data?.map((v) => (
-                <div
-                  key={v.id}
-                  className="flex items-center gap-3 rounded-md border px-3 py-2 text-sm data-[incompatible=true]:opacity-50"
-                  data-incompatible={!v.compatible}
-                >
-                  <div className="min-w-0 flex-1">
-                    <div className="truncate font-medium">{v.version_number}</div>
-                    <div className="truncate text-xs text-muted-foreground">
-                      {v.loaders.join(", ")} · {v.game_versions.slice(-3).join(", ")}
-                      {v.game_versions.length > 3 ? "…" : ""}
-                    </div>
-                  </div>
-                  {v.version_type !== "release" && <Badge variant="outline">{v.version_type}</Badge>}
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    disabled={!instance || !v.compatible || install.isPending}
-                    onClick={() => install.mutate({ instance: instance!, kind, project: p.id, version: v.id })}
+              <div className="overflow-hidden rounded-lg border">
+                {versions.data?.map((v) => (
+                  <div
+                    key={v.id}
+                    className={cn(
+                      "flex items-center gap-3 border-b px-3 py-2 last:border-b-0 hover:bg-accent/40",
+                      !v.compatible && "opacity-45",
+                    )}
                   >
-                    {install.isPending ? <Loader2 className="animate-spin" /> : <Download />}
-                  </Button>
-                </div>
-              ))}
+                    <span
+                      className={cn(
+                        "w-14 shrink-0 rounded px-1.5 py-px text-center text-[10px] font-semibold tracking-wide uppercase",
+                        VERSION_TYPE[v.version_type] ?? "bg-muted text-muted-foreground",
+                      )}
+                    >
+                      {v.version_type}
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate font-mono text-xs font-medium">{v.version_number}</div>
+                      <div className="truncate text-[11px] text-muted-foreground">
+                        {v.loaders.join(", ")} · {v.game_versions.slice(-4).join(", ")}
+                        {v.game_versions.length > 4 ? "…" : ""}
+                      </div>
+                    </div>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={!instance || !v.compatible || install.isPending}
+                      title={v.compatible ? "Install this version" : "Not compatible with the target instance"}
+                      onClick={() => install.mutate({ instance: instance!, kind, project: p.id, version: v.id })}
+                    >
+                      {install.isPending ? <Loader2 className="animate-spin" /> : <Download />}
+                      Install
+                    </Button>
+                  </div>
+                ))}
+              </div>
             </TabsContent>
 
             <TabsContent value="description">
               {/* Modrinth bodies are markdown with some inline HTML; the HTML
                   is intentionally not rendered (react-markdown skips it). */}
-              <article className="prose prose-sm max-w-none select-text dark:prose-invert prose-img:inline-block prose-img:my-1">
+              <article className="prose prose-sm max-w-none select-text dark:prose-invert prose-img:my-1 prose-img:inline-block">
                 <Markdown remarkPlugins={[remarkGfm]}>{p.body}</Markdown>
               </article>
             </TabsContent>

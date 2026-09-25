@@ -26,4 +26,25 @@ game_dir: string,
  * Whether `bananium_instance::InstanceStore::is_running` currently
  * sees a live pid recorded for this instance.
  */
-running: boolean, };
+running: boolean, 
+/**
+ * User-chosen library group; `None` is ungrouped.
+ */
+group: string | null, 
+/**
+ * Custom icon image, displayable through the desktop app's asset
+ * protocol. `None` means the frontend draws its own placeholder.
+ */
+icon_path: string | null, 
+/**
+ * Last launch time (Unix seconds); `None` if never played.
+ */
+last_played_unix: number | null, 
+/**
+ * Total time played across every launch.
+ */
+playtime_secs: number, 
+/**
+ * Enabled mods in `mods/`.
+ */
+mod_count: number, };

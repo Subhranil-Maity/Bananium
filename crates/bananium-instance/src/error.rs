@@ -29,6 +29,9 @@ pub enum Error {
     #[error("instance {0:?} is running; stop it first")]
     Running(String),
 
+    #[error("unsupported icon file {0:?}: use a PNG, JPEG, GIF or WebP image")]
+    UnsupportedIcon(String),
+
     #[error("no installed content named {0:?}")]
     ContentNotFound(String),
 

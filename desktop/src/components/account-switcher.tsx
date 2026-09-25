@@ -23,19 +23,21 @@ export function AccountSwitcher() {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button variant="ghost" size="sm" className="gap-2">
-          <PlayerAvatar name={active?.name ?? "Player"} className="size-6" />
-          <span className="max-w-32 truncate">{active?.name ?? "Player"}</span>
-          <ChevronDown className="size-4 opacity-60" />
+        <Button variant="ghost" size="sm" className="gap-2 pr-1.5 pl-1.5 text-[13px]">
+          <PlayerAvatar name={active?.name ?? "Player"} uuid={active?.uuid} className="size-5" />
+          <span className="max-w-32 truncate font-medium">{active?.name ?? "Player"}</span>
+          <ChevronDown className="size-3.5 opacity-50" />
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-56">
-        <DropdownMenuLabel>Play as</DropdownMenuLabel>
+        <DropdownMenuLabel className="text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
+          Play as
+        </DropdownMenuLabel>
         {profiles?.map((p) => (
           <DropdownMenuItem key={p.name} onSelect={() => !p.is_default && setDefault.mutate(p.name)}>
-            <PlayerAvatar name={p.name} className="size-5" />
+            <PlayerAvatar name={p.name} uuid={p.uuid} className="size-5" />
             <span className="flex-1 truncate">{p.name}</span>
-            {p.is_default && <Check className="size-4" />}
+            {p.is_default && <Check className="size-4 text-primary" />}
           </DropdownMenuItem>
         ))}
         {profiles?.length === 0 && (

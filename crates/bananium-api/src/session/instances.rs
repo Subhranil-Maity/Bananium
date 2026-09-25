@@ -1,6 +1,6 @@
 //! Instance management: list/set/remove/rename/clone/kill.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use bananium_instance::{InstanceStore, Loader};
 
@@ -28,8 +28,14 @@ impl Session {
         let mut summaries = Vec::new();
         for (slug, cfg) in instances.list_configs()? {
             let running = instances.is_running(&slug)?;
+            let stats = instances.stats(&slug);
             summaries.push(InstanceSummary {
                 game_dir: self.paths.instance_minecraft_dir(&slug),
+                icon_path: instances.icon(&slug),
+                mod_count: instances.mod_count(&slug),
+                last_played_unix: stats.last_played_unix,
+                playtime_secs: stats.playtime_secs,
+                group: cfg.group,
                 slug,
                 name: cfg.name,
                 mc_version: cfg.mc_version,
@@ -55,6 +61,7 @@ impl Session {
         ram_mb: Option<u32>,
         jvm_args: Option<Vec<String>>,
         java_path: Option<PathBuf>,
+        group: Option<String>,
     ) -> Result<CommandOutput> {
         let instances = self.instances();
         let mut cfg = instances.load(instance)?;
@@ -71,7 +78,23 @@ impl Session {
                 Some(java_path)
             };
         }
+        if let Some(group) = group {
+            let group = group.trim();
+            cfg.group = (!group.is_empty()).then(|| group.to_string());
+        }
         instances.save(instance, &cfg)?;
+        Ok(CommandOutput::InstanceUpdated {
+            instance: instance.to_string(),
+        })
+    }
+
+    /// `Command::InstanceSetIcon`.
+    pub(super) fn instance_set_icon(
+        &self,
+        instance: &str,
+        path: Option<&Path>,
+    ) -> Result<CommandOutput> {
+        self.instances().set_icon(instance, path)?;
         Ok(CommandOutput::InstanceUpdated {
             instance: instance.to_string(),
         })

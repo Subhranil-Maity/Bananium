@@ -42,6 +42,9 @@ enum Cmd {
         /// "latest" for the newest stable one.
         #[arg(long)]
         fabric: Option<String>,
+        /// Library group to file the new instance under.
+        #[arg(long)]
+        group: Option<String>,
     },
     /// List installable Minecraft versions.
     Versions {
@@ -176,6 +179,9 @@ enum InstanceAction {
         /// "clear" — this is how you actually empty the list.
         #[arg(long)]
         clear_java_args: bool,
+        /// Library group; pass "" to ungroup.
+        #[arg(long)]
+        group: Option<String>,
     },
     /// Delete an instance and everything in it (worlds included).
     Rm { instance: String },
@@ -215,12 +221,14 @@ async fn run_cli(command: Cmd, format_json: bool) -> std::process::ExitCode {
             version,
             name,
             fabric,
+            group,
         } => {
             let name = name.or_else(prompt_instance_name);
             Command::Install {
                 version,
                 name,
                 fabric_loader: fabric,
+                group,
             }
         }
         Cmd::Versions { all } => Command::VersionList {
@@ -242,6 +250,7 @@ async fn run_cli(command: Cmd, format_json: bool) -> std::process::ExitCode {
                 ram_mb,
                 java_arg,
                 clear_java_args,
+                group,
             } => Command::InstanceSet {
                 instance,
                 ram_mb,
@@ -253,6 +262,7 @@ async fn run_cli(command: Cmd, format_json: bool) -> std::process::ExitCode {
                     Some(java_arg)
                 },
                 java_path: None,
+                group,
             },
             InstanceAction::Rm { instance } => Command::InstanceRemove { instance },
             InstanceAction::Rename { instance, new_name } => {
@@ -568,8 +578,14 @@ fn print_output(output: &CommandOutput, as_json: bool) {
                     .ram_mb
                     .map(|m| format!("{m} MB"))
                     .unwrap_or_else(|| "default".to_string());
+                let group = i.group.as_deref().unwrap_or("-");
+                let played = format!(
+                    "{}h{:02}m",
+                    i.playtime_secs / 3600,
+                    i.playtime_secs / 60 % 60
+                );
                 println!(
-                    "{:<20} {:<12} [{status}] ram={ram} java_args={:?}",
+                    "{:<20} {:<12} [{status}] group={group} played={played} ram={ram} java_args={:?}",
                     i.slug, i.mc_version, i.jvm_args
                 );
             }
@@ -727,6 +743,20 @@ fn print_output(output: &CommandOutput, as_json: bool) {
         CommandOutput::LogChunk { text, .. } => {
             print!("{text}");
         }
+        CommandOutput::FileListed { entries, .. } => {
+            for e in entries {
+                let size = if e.is_dir {
+                    "<dir>".to_string()
+                } else {
+                    format_bytes(e.size)
+                };
+                println!("{:>10}  {}", size, e.path);
+            }
+        }
+        CommandOutput::FileContents { text, .. } => print!("{text}"),
+        CommandOutput::FileWritten { path } => println!("wrote {path}"),
+        CommandOutput::FileDeleted { path } => println!("deleted {path}"),
+        CommandOutput::FileImported { count } => println!("imported {count} item(s)"),
         CommandOutput::ProfileListed { profiles } => {
             if profiles.is_empty() {
                 println!("no profiles yet (\"Player\" is created on first launch)");

@@ -1,220 +1,192 @@
-import { useState } from "react";
-import { useNavigate, useParams } from "react-router";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Copy, FolderOpen, Loader2, Pencil, Terminal, Trash2 } from "lucide-react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import { Link, useNavigate, useParams } from "react-router";
+import { ArrowLeft, ChevronRight, Clock, FolderOpen, ImagePlus, MoreHorizontal, Package, Timer } from "lucide-react";
 import { openPath } from "@tauri-apps/plugin-opener";
-import { toast } from "sonner";
 
 import type { InstanceSummary } from "@/bindings/InstanceSummary";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
+import { DropdownMenu, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ContentManager } from "@/components/content-manager";
-import { DryRunDialog } from "@/components/dry-run-dialog";
+import { FileBrowser } from "@/components/file-browser";
+import { InstanceDropdownContent } from "@/components/instance-actions";
+import { InstanceIcon } from "@/components/instance-icon";
 import { InstanceSettings } from "@/components/instance-settings";
-import { LoaderBadge } from "@/components/loader-badge";
 import { LogViewer } from "@/components/log-viewer";
+import { EmptyState, Page } from "@/components/page";
 import { PlayButton } from "@/components/play-button";
-import { INSTANCES_KEY, useInstance } from "@/hooks/use-instances";
+import { pickIconFile, useInstance, useSetIcon } from "@/hooks/use-instances";
+import { loaderLabel } from "@/lib/instances";
+import { formatPlaytime, formatRelative } from "@/lib/utils";
 import { ScreenshotsPage } from "@/routes/screenshots";
-import { errorMessage, run } from "@/lib/api";
 
-const VALID_NAME = /^[A-Za-z0-9_-]+$/;
+type Tab = "content" | "files" | "logs" | "screenshots" | "settings";
 
-/** Rename or clone: both just ask for a new valid instance name. */
-function NameDialog({
-  instance,
-  mode,
-  onOpenChange,
-}: {
-  instance: InstanceSummary;
-  mode: "rename" | "clone" | null;
-  onOpenChange: (open: boolean) => void;
-}) {
-  const navigate = useNavigate();
-  const queryClient = useQueryClient();
-  const [name, setName] = useState("");
-  const invalid = name !== "" && !VALID_NAME.test(name);
-
-  const submit = useMutation({
-    mutationFn: async () => {
-      if (mode === "rename") {
-        return (
-          await run(
-            { command: "instance_rename", instance: instance.slug, new_name: name },
-            "instance_renamed",
-          )
-        ).instance;
-      }
-      return (
-        await run({ command: "instance_clone", instance: instance.slug, new_name: name }, "instance_cloned")
-      ).instance;
-    },
-    onSuccess: async (slug) => {
-      await queryClient.invalidateQueries({ queryKey: INSTANCES_KEY });
-      toast.success(mode === "rename" ? "Renamed" : "Cloned");
-      onOpenChange(false);
-      setName("");
-      navigate(`/instance/${slug}`, { replace: mode === "rename" });
-    },
-    onError: (err) => toast.error("Failed", { description: errorMessage(err) }),
-  });
-
+function Meta({ icon, children, title }: { icon?: ReactNode; children: ReactNode; title?: string }) {
   return (
-    <Dialog open={mode !== null} onOpenChange={onOpenChange}>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>{mode === "rename" ? "Rename instance" : "Clone instance"}</DialogTitle>
-        </DialogHeader>
-        <Input
-          autoFocus
-          placeholder={mode === "clone" ? `${instance.name}-copy` : instance.name}
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          aria-invalid={invalid}
-        />
-        {invalid && <p className="text-xs text-destructive">Only letters, digits, '-' and '_' are allowed.</p>}
-        <DialogFooter>
-          <Button disabled={!name || invalid || submit.isPending} onClick={() => submit.mutate()}>
-            {submit.isPending && <Loader2 className="animate-spin" />}
-            {mode === "rename" ? "Rename" : "Clone"}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+    <span className="flex items-center gap-1.5 [&_svg]:size-3.5 [&_svg]:text-muted-foreground/70" title={title}>
+      {icon}
+      {children}
+    </span>
   );
 }
 
-/** One instance: play/stop, logs, settings, and management actions. */
+function Header({ instance }: { instance: InstanceSummary }) {
+  const setIcon = useSetIcon();
+  return (
+    <div className="flex items-center gap-4">
+      <button
+        className="group relative rounded-lg focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+        title="Change icon"
+        onClick={() => void pickIconFile().then((path) => path && setIcon.mutate({ slug: instance.slug, path }))}
+      >
+        <InstanceIcon instance={instance} className="size-16" showRunning={false} />
+        <span className="absolute inset-0 flex items-center justify-center rounded-md bg-black/55 text-white opacity-0 transition-opacity group-hover:opacity-100">
+          <ImagePlus className="size-5" />
+        </span>
+      </button>
+
+      <div className="min-w-0 flex-1 space-y-1.5">
+        <div className="flex items-center gap-2.5">
+          <h1 className="truncate text-xl leading-tight font-semibold tracking-tight">{instance.name}</h1>
+          {instance.running && (
+            <span className="flex items-center gap-1.5 rounded-full bg-success/15 px-2 py-0.5 text-[11px] font-semibold text-success">
+              <span className="size-1.5 animate-pulse rounded-full bg-success" /> Running
+            </span>
+          )}
+        </div>
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground tabular-nums">
+          <span className="font-medium text-foreground/85">
+            {loaderLabel(instance, true)} <span className="text-muted-foreground">·</span> Minecraft {instance.mc_version}
+          </span>
+          {instance.group && (
+            <span className="rounded border px-1.5 py-px text-[11px]" title="Group">
+              {instance.group}
+            </span>
+          )}
+          <Meta icon={<Clock />} title="Last played">
+            {instance.last_played_unix ? `Played ${formatRelative(instance.last_played_unix)}` : "Never played"}
+          </Meta>
+          <Meta icon={<Timer />} title="Total playtime">
+            {formatPlaytime(instance.playtime_secs)} played
+          </Meta>
+          {instance.loader === "fabric" && (
+            <Meta icon={<Package />}>
+              {instance.mod_count} mod{instance.mod_count === 1 ? "" : "s"}
+            </Meta>
+          )}
+        </div>
+      </div>
+
+      <div className="flex items-center gap-1.5">
+        <Button variant="outline" size="icon" title="Open game folder" onClick={() => void openPath(instance.game_dir)}>
+          <FolderOpen />
+        </Button>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button variant="outline" size="icon" aria-label="More actions">
+              <MoreHorizontal />
+            </Button>
+          </DropdownMenuTrigger>
+          <InstanceDropdownContent instance={instance} includeOpen={false} includePlay={false} />
+        </DropdownMenu>
+        <PlayButton instance={instance} size="lg" className="ml-1 w-32" />
+      </div>
+    </div>
+  );
+}
+
+/** One instance: header with play/stop and stats, then content, logs, screenshots and settings. */
 export function InstancePage() {
   const { slug } = useParams();
   const navigate = useNavigate();
-  const queryClient = useQueryClient();
   const { data: instance, isLoading } = useInstance(slug);
-  const [nameMode, setNameMode] = useState<"rename" | "clone" | null>(null);
-  const [confirmDelete, setConfirmDelete] = useState(false);
-  const [dryRun, setDryRun] = useState(false);
+  const [tab, setTab] = useState<Tab>(() => (instance?.running ? "logs" : "content"));
 
-  const remove = useMutation({
-    mutationFn: (s: string) => run({ command: "instance_remove", instance: s }, "instance_removed"),
-    onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: INSTANCES_KEY });
-      toast.success("Instance deleted");
-      navigate("/");
-    },
-    onError: (err) => toast.error("Delete failed", { description: errorMessage(err) }),
-  });
+  // Starting the game from here jumps to its live log.
+  const wasRunning = useRef(instance?.running ?? false);
+  useEffect(() => {
+    if (!instance) return;
+    if (instance.running && !wasRunning.current) setTab("logs");
+    wasRunning.current = instance.running;
+  }, [instance]);
 
   if (isLoading) return null;
   if (!instance) {
     return (
-      <div className="space-y-4">
-        <p className="text-muted-foreground">Instance not found.</p>
-        <Button variant="outline" onClick={() => navigate("/")}>
-          <ArrowLeft /> Back to library
-        </Button>
-      </div>
+      <Page>
+        <EmptyState>
+          <p className="mb-3">That instance doesn't exist any more.</p>
+          <Button variant="outline" onClick={() => navigate("/")}>
+            <ArrowLeft /> Back to library
+          </Button>
+        </EmptyState>
+      </Page>
     );
   }
 
   return (
-    <div className="flex h-full min-h-0 flex-col gap-4">
-      <div className="flex items-center gap-3">
-        <Button variant="ghost" size="icon" onClick={() => navigate("/")}>
-          <ArrowLeft />
-        </Button>
-        <div className="min-w-0 flex-1">
-          <h1 className="flex items-center gap-2 truncate text-2xl font-semibold">
-            {instance.name}
-            {instance.running && <Badge className="bg-green-600 text-white">Running</Badge>}
-          </h1>
-          <p className="flex items-center gap-2 text-sm text-muted-foreground">
-            Minecraft {instance.mc_version} <LoaderBadge instance={instance} />
-          </p>
-        </div>
-        <Button variant="outline" size="icon" title="Open folder" onClick={() => void openPath(instance.game_dir)}>
-          <FolderOpen />
-        </Button>
-        <Button variant="outline" size="icon" title="Preview launch command" onClick={() => setDryRun(true)}>
-          <Terminal />
-        </Button>
-        <PlayButton instance={instance} className="w-28" />
+    <Tabs value={tab} onValueChange={(v) => setTab(v as Tab)} className="flex h-full min-h-0 flex-col gap-0">
+      <div className="border-b px-5 pt-3">
+        <nav className="mb-3 flex items-center gap-1 text-xs text-muted-foreground">
+          <Link to="/" className="hover:text-foreground">
+            Library
+          </Link>
+          <ChevronRight className="size-3" />
+          {instance.group && (
+            <>
+              <span>{instance.group}</span>
+              <ChevronRight className="size-3" />
+            </>
+          )}
+          <span className="text-foreground/80">{instance.name}</span>
+        </nav>
+        <Header instance={instance} />
+        <TabsList variant="line" className="mt-3 h-9 gap-4 p-0">
+          {(
+            [
+              ["content", "Content"],
+              ["logs", "Logs"],
+              ["files", "Files"],
+              ["screenshots", "Screenshots"],
+              ["settings", "Settings"],
+            ] as const
+          ).map(([value, label]) => (
+            <TabsTrigger
+              key={value}
+              value={value}
+              className="flex-none px-0.5 text-[13px] after:bottom-[-1px]! data-[state=active]:after:bg-primary"
+            >
+              {label}
+              {value === "logs" && instance.running && <span className="size-1.5 animate-pulse rounded-full bg-success" />}
+            </TabsTrigger>
+          ))}
+        </TabsList>
       </div>
 
-      <Tabs defaultValue="content" className="flex min-h-0 flex-1 flex-col">
-        <TabsList>
-          <TabsTrigger value="content">Content</TabsTrigger>
-          <TabsTrigger value="screenshots">Screenshots</TabsTrigger>
-          <TabsTrigger value="logs">Logs</TabsTrigger>
-          <TabsTrigger value="settings">Settings</TabsTrigger>
-        </TabsList>
-        <TabsContent value="screenshots" className="overflow-y-auto">
-          <ScreenshotsPage instance={instance.slug} />
-        </TabsContent>
-        <TabsContent value="content" className="overflow-y-auto">
+      <TabsContent value="content" className="min-h-0 overflow-y-auto">
+        <Page className="pt-3">
           <ContentManager instance={instance} />
-        </TabsContent>
-        <TabsContent value="logs" className="min-h-0 flex-1">
-          <LogViewer slug={instance.slug} live={instance.running} />
-        </TabsContent>
-        <TabsContent value="settings" className="space-y-6 overflow-y-auto">
+        </Page>
+      </TabsContent>
+      <TabsContent value="logs" className="min-h-0 p-3">
+        <LogViewer slug={instance.slug} live={instance.running} />
+      </TabsContent>
+      <TabsContent value="files" className="min-h-0 overflow-y-auto">
+        <Page className="pt-3">
+          <FileBrowser instance={instance} />
+        </Page>
+      </TabsContent>
+      <TabsContent value="screenshots" className="min-h-0 overflow-y-auto">
+        <Page className="pt-3">
+          <ScreenshotsPage instance={instance.slug} />
+        </Page>
+      </TabsContent>
+      <TabsContent value="settings" className="min-h-0 overflow-y-auto">
+        <Page className="pt-3">
           <InstanceSettings key={instance.slug} instance={instance} />
-          <div className="max-w-2xl space-y-3 rounded-lg border p-4">
-            <h2 className="font-medium">Manage</h2>
-            <div className="flex flex-wrap gap-2">
-              <Button variant="outline" disabled={instance.running} onClick={() => setNameMode("rename")}>
-                <Pencil /> Rename
-              </Button>
-              <Button variant="outline" onClick={() => setNameMode("clone")}>
-                <Copy /> Clone
-              </Button>
-              <Button variant="destructive" disabled={instance.running} onClick={() => setConfirmDelete(true)}>
-                <Trash2 /> Delete
-              </Button>
-            </div>
-          </div>
-        </TabsContent>
-      </Tabs>
-
-      <NameDialog instance={instance} mode={nameMode} onOpenChange={(o) => !o && setNameMode(null)} />
-      <DryRunDialog slug={instance.slug} open={dryRun} onOpenChange={setDryRun} />
-      <AlertDialog open={confirmDelete} onOpenChange={setConfirmDelete}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Delete {instance.name}?</AlertDialogTitle>
-            <AlertDialogDescription>
-              This permanently deletes the instance, including its worlds, mods and screenshots.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              className="bg-destructive text-white hover:bg-destructive/90"
-              onClick={() => remove.mutate(instance.slug)}
-            >
-              Delete
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-    </div>
+        </Page>
+      </TabsContent>
+    </Tabs>
   );
 }

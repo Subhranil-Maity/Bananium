@@ -38,9 +38,14 @@ milestone order — see the table below for exactly what each covers:
   with `bananium --gui`), built on direct request, ahead of any PLAN.md
   milestone. The Rust side is a thin bridge: one Tauri command,
   `dispatch(Command) -> CommandOutput`, and every `Event` re-emitted to the
-  webview as `bananium://event`. Screens: Library, instance page (Content —
-  mods/resource packs/shaders — Screenshots, Logs, Settings), Browse
-  (Modrinth), Presets, Screenshots (all instances), Accounts, Settings.
+  webview as `bananium://event`. Screens: Library (grid/list, group/sort),
+  instance page (Content — mods/resource packs/shaders — Files, Logs,
+  Screenshots, Settings), Browse (Modrinth), Presets, Screenshots (all
+  instances), Accounts, Settings. The webview's native right-click menu is
+  replaced app-wide by `GlobalContextMenu`; component menus (Radix
+  `ContextMenu`) `preventDefault` first and take precedence.
+  Rail/tooltip gotcha: never give a Radix `asChild` child (e.g. `NavLink`)
+  a function-valued `className` — `Slot` stringifies it.
   TypeScript types in `desktop/src/bindings/` are **generated** from the
   Rust types by ts-rs (see "Building and verifying") — never hand-edit them.
   **Use bun, never npm**, for everything in `desktop/`.
@@ -65,9 +70,16 @@ milestone order — see the table below for exactly what each covers:
   `bananium-api` for search/install/updates. The SQLite/FTS5 offline
   mirror M4 calls for is **not** built — Modrinth browsing needs a network.
 - `bananium-instance`: named instances, RAM/JVM-arg/Java overrides,
-  clone/rename/remove, pid-based running tracking (`running.toml`; liveness
-  checked on Linux and Windows), the content lockfile, and presets. Still
-  missing: export/import formats, groups, tags.
+  library groups, custom icons (`icon-<millis>.<ext>` so each change gets a
+  new URL), clone/rename/remove, pid-based running tracking (`running.toml`
+  records each run's start time and log; liveness checked on Linux and
+  Windows), play stats (`stats.toml`: last played + playtime — exact on exit
+  in a long-lived session, estimated from the log's mtime when a dead run is
+  swept), the content lockfile, and presets. Still missing: export/import
+  formats, tags.
+- `File*` commands (`bananium-api/src/session/files.rs`) are a file manager
+  over an instance's game directory; `resolve_game_path` is the single gate
+  that refuses anything escaping it.
 - `bananium-java` only does system-JVM detection (`JAVA_HOME`/`PATH`/
   `/usr/lib/jvm`). Mojang java-runtime auto-provisioning and the aarch64
   Adoptium fallback are M3 work and are **not** implemented — if no system

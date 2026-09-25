@@ -54,12 +54,15 @@ pub enum Command {
     ///
     /// `fabric_loader` installs the Fabric mod loader on top: a loader
     /// version such as `"0.16.9"`, or `"latest"` for the newest stable one.
+    /// `group` files a newly created instance under that library group.
     Install {
         version: String,
         #[serde(default)]
         name: Option<String>,
         #[serde(default)]
         fabric_loader: Option<String>,
+        #[serde(default)]
+        group: Option<String>,
     },
     /// Every Minecraft version Mojang publishes, newest first.
     VersionList {
@@ -105,6 +108,17 @@ pub enum Command {
         #[serde(default)]
         #[cfg_attr(feature = "ts", ts(type = "string | null"))]
         java_path: Option<PathBuf>,
+        /// Library group. `Some("")` ungroups it; `None` leaves it alone.
+        #[serde(default)]
+        group: Option<String>,
+    },
+    /// Set an instance's icon to a copy of the image at `path` (PNG, JPEG,
+    /// GIF or WebP), or clear it back to the default when `path` is `None`.
+    InstanceSetIcon {
+        instance: String,
+        #[serde(default)]
+        #[cfg_attr(feature = "ts", ts(type = "string | null"))]
+        path: Option<PathBuf>,
     },
     /// Delete an instance and everything in it. Refused while running.
     InstanceRemove {
@@ -138,6 +152,53 @@ pub enum Command {
         #[serde(default)]
         #[cfg_attr(feature = "ts", ts(type = "number"))]
         offset: u64,
+    },
+    /// The entries of one folder in an instance's game directory. Every
+    /// `File*` path is relative to the game directory and `/`-separated;
+    /// `""` is the game directory itself. Anything reaching outside it
+    /// (`..`, absolute paths) is refused.
+    FileList {
+        instance: String,
+        #[serde(default)]
+        path: String,
+    },
+    /// A text file's contents for in-app editing (at most 2 MiB, UTF-8).
+    FileRead {
+        instance: String,
+        path: String,
+    },
+    /// Save `text` to a file, creating it and missing parent folders.
+    /// `create_new` refuses to overwrite an existing file.
+    FileWrite {
+        instance: String,
+        path: String,
+        text: String,
+        #[serde(default)]
+        create_new: bool,
+    },
+    /// Create a folder (and any missing parents).
+    FileCreateDir {
+        instance: String,
+        path: String,
+    },
+    /// Rename or move a file or folder within the game directory.
+    FileRename {
+        instance: String,
+        from: String,
+        to: String,
+    },
+    /// Delete a file, or a folder and everything in it.
+    FileDelete {
+        instance: String,
+        path: String,
+    },
+    /// Copy files or folders from anywhere on disk into folder `path`.
+    FileImport {
+        instance: String,
+        #[serde(default)]
+        path: String,
+        #[cfg_attr(feature = "ts", ts(type = "Array<string>"))]
+        sources: Vec<PathBuf>,
     },
     /// Search Modrinth for one kind of content. With `instance`, results
     /// are narrowed to what that instance can use (its Minecraft version,

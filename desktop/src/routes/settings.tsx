@@ -1,38 +1,62 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { FileSearch, Loader2, RefreshCw } from "lucide-react";
+import { Check, FileSearch, FolderOpen, Loader2, Moon, RefreshCw, Sun } from "lucide-react";
 import { open } from "@tauri-apps/plugin-dialog";
+import { openPath } from "@tauri-apps/plugin-opener";
 import { toast } from "sonner";
 
 import type { Config } from "@/bindings/Config";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Switch } from "@/components/ui/switch";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import { Page, PageHeader, Section } from "@/components/page";
 import { errorMessage, run } from "@/lib/api";
-import { useTheme } from "@/stores/theme";
+import { cn } from "@/lib/utils";
+import { useTheme, type Theme } from "@/stores/theme";
 
 const CONFIG_KEY = ["config"] as const;
 
-function Row({ label, value }: { label: string; value: string }) {
+function Row({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
   return (
-    <div className="grid grid-cols-[160px_1fr] gap-4 py-1.5 text-sm">
-      <span className="text-muted-foreground">{label}</span>
+    <div className="grid grid-cols-[200px_1fr] items-start gap-6">
+      <div className="pt-1.5">
+        <Label className="text-[13px]">{label}</Label>
+        {hint && <p className="mt-0.5 text-xs text-muted-foreground">{hint}</p>}
+      </div>
+      <div className="min-w-0">{children}</div>
+    </div>
+  );
+}
+
+function PathRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="group grid grid-cols-[200px_1fr_auto] items-center gap-6 py-0.5">
+      <span className="text-[13px] text-muted-foreground">{label}</span>
       <span className="truncate font-mono text-xs select-text" title={value}>
         {value}
       </span>
+      <Button
+        variant="ghost"
+        size="icon-sm"
+        className="opacity-0 group-hover:opacity-100"
+        title="Open"
+        onClick={() => void openPath(value)}
+      >
+        <FolderOpen />
+      </Button>
     </div>
   );
 }
 
 /** Settings form, seeded from the loaded config (remounted when it changes). */
-function GeneralSettings({ config }: { config: Config }) {
+function GameSettings({ config }: { config: Config }) {
   const queryClient = useQueryClient();
   const [downloads, setDownloads] = useState(String(config.max_concurrent_downloads));
   const [java, setJava] = useState(config.java_path ?? "");
   const downloadsInvalid = !/^\d+$/.test(downloads) || Number(downloads) < 1 || Number(downloads) > 64;
+  const dirty = downloads !== String(config.max_concurrent_downloads) || java.trim() !== (config.java_path ?? "");
 
   const javaList = useQuery({
     queryKey: ["java-list"],
@@ -64,30 +88,20 @@ function GeneralSettings({ config }: { config: Config }) {
   }
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Game &amp; downloads</CardTitle>
-        <CardDescription>Stored in config.toml; instances can override Java in their own settings.</CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-5">
+    <Section
+      title="Java & downloads"
+      description="Stored in config.toml. Instances can override Java in their own settings."
+      actions={
+        <Button size="sm" disabled={!dirty || downloadsInvalid || save.isPending} onClick={() => save.mutate()}>
+          {save.isPending && <Loader2 className="animate-spin" />}
+          Save changes
+        </Button>
+      }
+    >
+      <Row label="Java executable" hint="Used by every instance without its own override.">
         <div className="space-y-2">
-          <Label htmlFor="downloads">Parallel downloads</Label>
-          <Input
-            id="downloads"
-            inputMode="numeric"
-            className="w-32"
-            value={downloads}
-            onChange={(e) => setDownloads(e.target.value)}
-            aria-invalid={downloadsInvalid}
-          />
-          <p className="text-xs text-muted-foreground">1–64. More is faster on a fast connection but uses more memory.</p>
-        </div>
-
-        <div className="space-y-2">
-          <Label htmlFor="java">Java executable</Label>
           <div className="flex gap-2">
             <Input
-              id="java"
               className="font-mono text-xs"
               placeholder="Auto-detect"
               value={java}
@@ -97,13 +111,12 @@ function GeneralSettings({ config }: { config: Config }) {
               <FileSearch />
             </Button>
           </div>
-          <div className="space-y-1 rounded-md border p-2">
-            <div className="flex items-center justify-between text-xs text-muted-foreground">
-              Detected on this computer
+          <div className="overflow-hidden rounded-md border">
+            <div className="flex h-8 items-center justify-between border-b bg-muted/30 pr-1 pl-2.5 text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
+              Detected installations
               <Button
                 variant="ghost"
-                size="icon"
-                className="size-6"
+                size="icon-xs"
                 title="Scan again"
                 disabled={javaList.isFetching}
                 onClick={() => void javaList.refetch()}
@@ -111,32 +124,42 @@ function GeneralSettings({ config }: { config: Config }) {
                 <RefreshCw className={javaList.isFetching ? "animate-spin" : ""} />
               </Button>
             </div>
-            {javaList.isLoading && <Skeleton className="h-8" />}
-            {javaList.data?.length === 0 && <p className="text-xs text-muted-foreground">No Java installations found.</p>}
+            {javaList.isLoading && <Skeleton className="m-2 h-7" />}
+            {javaList.data?.length === 0 && (
+              <p className="px-2.5 py-2 text-xs text-muted-foreground">No Java installations found.</p>
+            )}
             {javaList.data?.map((j) => (
               <button
                 key={j.path}
-                className="flex w-full items-center gap-2 rounded px-2 py-1 text-left text-xs hover:bg-accent data-[on=true]:bg-accent"
-                data-on={java === j.path}
+                className={cn(
+                  "flex w-full items-center gap-3 border-b px-2.5 py-1.5 text-left text-xs last:border-b-0 hover:bg-accent/60",
+                  java === j.path && "bg-primary/[0.07]",
+                )}
                 onClick={() => setJava(j.path)}
               >
-                <span className="w-16 shrink-0 font-medium">Java {j.major_version}</span>
-                <span className="truncate font-mono text-muted-foreground">{j.path}</span>
+                <span className="w-14 shrink-0 font-semibold tabular-nums">Java {j.major_version}</span>
+                <span className="flex-1 truncate font-mono text-muted-foreground">{j.path}</span>
+                {java === j.path && <Check className="size-3.5 text-primary" />}
               </button>
             ))}
           </div>
         </div>
+      </Row>
 
-        <Button disabled={downloadsInvalid || save.isPending} onClick={() => save.mutate()}>
-          {save.isPending && <Loader2 className="animate-spin" />}
-          Save
-        </Button>
-      </CardContent>
-    </Card>
+      <Row label="Parallel downloads" hint="1–64. Higher is faster on a fast line, but uses more memory.">
+        <Input
+          inputMode="numeric"
+          className="w-24 tabular-nums"
+          value={downloads}
+          onChange={(e) => setDownloads(e.target.value)}
+          aria-invalid={downloadsInvalid}
+        />
+      </Row>
+    </Section>
   );
 }
 
-/** Appearance, downloads and Java, plus a read-only view of data paths. */
+/** Appearance, Java and downloads, plus a read-only view of data paths. */
 export function SettingsPage() {
   const { theme, setTheme } = useTheme();
   const { data, isLoading, error } = useQuery({
@@ -145,39 +168,47 @@ export function SettingsPage() {
   });
 
   return (
-    <div className="max-w-3xl space-y-6">
-      <h1 className="text-2xl font-semibold">Settings</h1>
+    <Page className="max-w-4xl">
+      <PageHeader title="Settings" />
+      <div className="space-y-4">
+        <Section title="Appearance">
+          <Row label="Theme">
+            <ToggleGroup
+              type="single"
+              variant="outline"
+              value={theme}
+              onValueChange={(v) => v && setTheme(v as Theme)}
+            >
+              <ToggleGroupItem value="dark" className="px-3">
+                <Moon /> Dark
+              </ToggleGroupItem>
+              <ToggleGroupItem value="light" className="px-3">
+                <Sun /> Light
+              </ToggleGroupItem>
+            </ToggleGroup>
+          </Row>
+        </Section>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Appearance</CardTitle>
-        </CardHeader>
-        <CardContent className="flex items-center gap-3">
-          <Switch id="dark" checked={theme === "dark"} onCheckedChange={(on) => setTheme(on ? "dark" : "banana")} />
-          <Label htmlFor="dark">Dark mode</Label>
-        </CardContent>
-      </Card>
-
-      {isLoading && <Skeleton className="h-60" />}
-      {error && <p className="text-sm text-destructive">{errorMessage(error)}</p>}
-      {data && (
-        <>
-          <GeneralSettings key={JSON.stringify(data.config)} config={data.config} />
-          <Card>
-            <CardHeader>
-              <CardTitle>Data locations</CardTitle>
-              <CardDescription>Set the BANANIUM_HOME environment variable to move everything.</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <Row label="Data directory" value={data.paths.home} />
-              <Row label="Instances" value={data.paths.instances_dir} />
-              <Row label="Store" value={data.paths.store_dir} />
-              <Row label="Assets" value={data.paths.assets_dir} />
-              <Row label="config.toml" value={data.paths.config_toml} />
-            </CardContent>
-          </Card>
-        </>
-      )}
-    </div>
+        {isLoading && <Skeleton className="h-60" />}
+        {error && <p className="text-sm text-destructive">{errorMessage(error)}</p>}
+        {data && (
+          <>
+            <GameSettings key={JSON.stringify(data.config)} config={data.config} />
+            <Section
+              title="Data locations"
+              description="Set the BANANIUM_HOME environment variable to move everything."
+            >
+              <div>
+                <PathRow label="Data directory" value={data.paths.home} />
+                <PathRow label="Instances" value={data.paths.instances_dir} />
+                <PathRow label="Content store" value={data.paths.store_dir} />
+                <PathRow label="Assets" value={data.paths.assets_dir} />
+                <PathRow label="config.toml" value={data.paths.config_toml} />
+              </div>
+            </Section>
+          </>
+        )}
+      </div>
+    </Page>
   );
 }
