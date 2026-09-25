@@ -63,6 +63,18 @@ pub enum Error {
     NotText(String),
     #[error("{0:?} already exists")]
     FileExists(String),
+    #[error(
+        "the chosen Java {0:?} can't be run; pick another in the instance's or global Java setting"
+    )]
+    JavaNotRunnable(String),
+    #[error(
+        "no Java runtime for {component}{}: Mojang publishes none for this platform and no matching Java was found; choose one in the instance's Java setting",
+        major.map(|m| format!(" (Java {m})")).unwrap_or_default()
+    )]
+    NoSuitableJava {
+        component: String,
+        major: Option<u32>,
+    },
     #[error("not a valid .mrpack: {0}")]
     BadModpack(String),
     #[error("{0}")]

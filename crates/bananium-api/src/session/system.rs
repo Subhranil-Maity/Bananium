@@ -1,4 +1,4 @@
-//! Screenshots across instances, settings, and Java detection.
+//! Screenshots across instances, and settings. (Java lives in `java.rs`.)
 
 use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
@@ -7,7 +7,7 @@ use bananium_core::Config;
 
 use super::Session;
 use crate::error::{Error, Result};
-use crate::output::{CommandOutput, JavaInstall, Screenshot};
+use crate::output::{CommandOutput, Screenshot};
 
 impl Session {
     /// The live config (see `Command::ConfigSet`).
@@ -26,24 +26,6 @@ impl Session {
         let updated = Config::update_file(&self.paths, max_concurrent_downloads, java_path)?;
         *self.config.write().expect("config lock poisoned") = updated;
         self.config_show()
-    }
-
-    /// `Command::JavaList`: every JVM detected on this machine. Runs each
-    /// candidate's `java -version`, so it's blocking work kept off the
-    /// async runtime's worker threads.
-    pub(super) async fn java_list(&self) -> Result<CommandOutput> {
-        let found = tokio::task::spawn_blocking(bananium_java::find_all_java)
-            .await
-            .unwrap_or_default();
-        Ok(CommandOutput::JavaListed {
-            installs: found
-                .into_iter()
-                .map(|c| JavaInstall {
-                    path: c.path,
-                    major_version: c.major_version,
-                })
-                .collect(),
-        })
     }
 
     /// `Command::ScreenshotList`: PNGs from every instance's (or one

@@ -2,6 +2,7 @@ mod content;
 mod download;
 mod files;
 mod instances;
+mod java;
 mod logs;
 mod modpacks;
 mod presets;
@@ -103,6 +104,8 @@ impl Session {
                 java_path,
             } => self.config_set(max_concurrent_downloads, java_path),
             Command::JavaList => self.java_list().await,
+            Command::JavaRuntimeRemove { component } => self.java_runtime_remove(&component),
+            Command::InstanceJava { instance } => self.instance_java(&instance).await,
             Command::ScreenshotList { instance } => self.screenshot_list(instance.as_deref()),
             Command::ScreenshotDelete { path } => self.screenshot_delete(&path),
             Command::Install {
@@ -452,6 +455,12 @@ impl Session {
             )?;
         }
 
+        // The Java runtime Mojang's profile names, so the instance is ready
+        // to launch — offline, even — the moment it exists. `None` just means
+        // Mojang has no runtime for this platform; launch handles that.
+        let (component, _) = java::required_runtime(&profile);
+        self.ensure_runtime(task_id, &component).await?;
+
         let instances = InstanceStore::new(self.paths.clone());
         let slug = instances.create_named(&vanilla.id, name)?;
         if loader != Loader::Vanilla {
@@ -526,12 +535,9 @@ impl Session {
             None => profiles.default_profile()?,
         };
 
-        let java = bananium_java::find_java(
-            instance_cfg
-                .java_path
-                .as_deref()
-                .or(self.config().java_path.as_deref()),
-        )?;
+        // Mojang's runtime for this version unless the user chose a Java;
+        // downloaded here, before anything is spawned, if it's missing.
+        let java_path = self.resolve_java(&instance_cfg, &profile, dry_run).await?;
 
         let ctx = LaunchContext {
             player_name: local_profile.name,
@@ -548,7 +554,7 @@ impl Session {
             extra_jvm_args: instance_cfg.jvm_args.clone(),
         };
 
-        let plan = build_launch_plan(&profile, &platform, &features, &ctx, java.path);
+        let plan = build_launch_plan(&profile, &platform, &features, &ctx, java_path);
 
         if dry_run {
             return Ok(CommandOutput::LaunchPlanned {

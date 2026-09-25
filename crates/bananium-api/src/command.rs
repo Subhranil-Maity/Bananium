@@ -54,8 +54,19 @@ pub enum Command {
         #[cfg_attr(feature = "ts", ts(type = "string | null"))]
         java_path: Option<PathBuf>,
     },
-    /// Every JVM detected on this machine.
+    /// Every usable JVM: Mojang runtimes Bananium downloaded, then every
+    /// JVM detected on this machine.
     JavaList,
+    /// Delete a downloaded Mojang runtime (e.g. `"java-runtime-delta"`);
+    /// it's downloaded again when next needed.
+    JavaRuntimeRemove {
+        component: String,
+    },
+    /// Which Mojang runtime an instance uses by default, and whether it's
+    /// downloaded yet.
+    InstanceJava {
+        instance: String,
+    },
     /// Screenshots from every instance (or just `instance`), newest first.
     ScreenshotList {
         #[serde(default)]

@@ -1,7 +1,6 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Check, FileSearch, FolderOpen, Loader2, Moon, RefreshCw, Sun } from "lucide-react";
-import { open } from "@tauri-apps/plugin-dialog";
+import { FolderOpen, Loader2, Moon, Sun, Trash2 } from "lucide-react";
 import { openPath } from "@tauri-apps/plugin-opener";
 import { toast } from "sonner";
 
@@ -11,9 +10,11 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import { JavaPicker } from "@/components/java-picker";
 import { Page, PageHeader, Section } from "@/components/page";
+import { useJavaList, useRemoveRuntime } from "@/hooks/use-java";
 import { errorMessage, run } from "@/lib/api";
-import { cn } from "@/lib/utils";
+import { formatBytes } from "@/lib/utils";
 import { useTheme, type Theme } from "@/stores/theme";
 
 const CONFIG_KEY = ["config"] as const;
@@ -58,11 +59,9 @@ function GameSettings({ config }: { config: Config }) {
   const downloadsInvalid = !/^\d+$/.test(downloads) || Number(downloads) < 1 || Number(downloads) > 64;
   const dirty = downloads !== String(config.max_concurrent_downloads) || java.trim() !== (config.java_path ?? "");
 
-  const javaList = useQuery({
-    queryKey: ["java-list"],
-    queryFn: async () => (await run({ command: "java_list" }, "java_listed")).installs,
-    staleTime: Infinity,
-  });
+  const javaList = useJavaList();
+  const removeRuntime = useRemoveRuntime();
+  const runtimes = javaList.data?.filter((j) => j.source === "mojang") ?? [];
 
   const save = useMutation({
     mutationFn: () =>
@@ -70,7 +69,7 @@ function GameSettings({ config }: { config: Config }) {
         {
           command: "config_set",
           max_concurrent_downloads: Number(downloads),
-          // "" clears back to auto-detection.
+          // "" clears back to Mojang's runtime per version.
           java_path: java.trim(),
         },
         "config_shown",
@@ -81,11 +80,6 @@ function GameSettings({ config }: { config: Config }) {
     },
     onError: (err) => toast.error("Couldn't save settings", { description: errorMessage(err) }),
   });
-
-  async function browse() {
-    const picked = await open({ multiple: false, title: "Choose a Java executable" });
-    if (typeof picked === "string") setJava(picked);
-  }
 
   return (
     <Section
@@ -98,51 +92,61 @@ function GameSettings({ config }: { config: Config }) {
         </Button>
       }
     >
-      <Row label="Java executable" hint="Used by every instance without its own override.">
-        <div className="space-y-2">
-          <div className="flex gap-2">
-            <Input
-              className="font-mono text-xs"
-              placeholder="Auto-detect"
-              value={java}
-              onChange={(e) => setJava(e.target.value)}
-            />
-            <Button variant="outline" size="icon" title="Browse" onClick={() => void browse()}>
-              <FileSearch />
-            </Button>
-          </div>
-          <div className="overflow-hidden rounded-md border">
-            <div className="flex h-8 items-center justify-between border-b bg-muted/30 pr-1 pl-2.5 text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
-              Detected installations
+      <Row
+        label="Java"
+        hint="By default each version runs on the Java runtime Mojang ships for it, downloaded automatically. Pick one here to use it for every instance instead."
+      >
+        <JavaPicker
+          value={java.trim()}
+          onChange={setJava}
+          defaultLabel={
+            <span className="flex items-center gap-2">
+              <span className="font-medium">Automatic</span>
+              <span className="text-muted-foreground">Mojang official runtime per version</span>
+            </span>
+          }
+        />
+      </Row>
+
+      <Row label="Mojang runtimes" hint={`Downloaded into java/ and shared by every instance.`}>
+        <div className="overflow-hidden rounded-md border">
+          {javaList.isLoading && <Skeleton className="m-2 h-7" />}
+          {!javaList.isLoading && runtimes.length === 0 && (
+            <p className="px-2.5 py-2 text-xs text-muted-foreground">
+              None yet. They download when you create or first launch an instance.
+            </p>
+          )}
+          {runtimes.map((j) => (
+            <div
+              key={j.path}
+              className="group flex items-center gap-3 border-b px-2.5 py-1.5 text-xs last:border-b-0 hover:bg-accent/40"
+            >
+              <span className="w-14 shrink-0 font-semibold tabular-nums">Java {j.major_version}</span>
+              <span className="w-40 shrink-0 truncate font-mono">{j.component}</span>
+              <span className="flex-1 truncate text-muted-foreground tabular-nums">
+                {j.version} · {formatBytes(j.size_bytes ?? 0)}
+              </span>
               <Button
                 variant="ghost"
                 size="icon-xs"
-                title="Scan again"
-                disabled={javaList.isFetching}
-                onClick={() => void javaList.refetch()}
+                className="opacity-0 group-hover:opacity-100"
+                title="Show in folder"
+                onClick={() => void openPath(j.path.replace(/[\\/]bin[\\/]java(\.exe)?$/, ""))}
               >
-                <RefreshCw className={javaList.isFetching ? "animate-spin" : ""} />
+                <FolderOpen />
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon-xs"
+                className="text-muted-foreground opacity-0 group-hover:opacity-100 hover:text-destructive"
+                title="Remove (downloads again when needed)"
+                disabled={removeRuntime.isPending}
+                onClick={() => removeRuntime.mutate(j.component!)}
+              >
+                <Trash2 />
               </Button>
             </div>
-            {javaList.isLoading && <Skeleton className="m-2 h-7" />}
-            {javaList.data?.length === 0 && (
-              <p className="px-2.5 py-2 text-xs text-muted-foreground">No Java installations found.</p>
-            )}
-            {javaList.data?.map((j) => (
-              <button
-                key={j.path}
-                className={cn(
-                  "flex w-full items-center gap-3 border-b px-2.5 py-1.5 text-left text-xs last:border-b-0 hover:bg-accent/60",
-                  java === j.path && "bg-primary/[0.07]",
-                )}
-                onClick={() => setJava(j.path)}
-              >
-                <span className="w-14 shrink-0 font-semibold tabular-nums">Java {j.major_version}</span>
-                <span className="flex-1 truncate font-mono text-muted-foreground">{j.path}</span>
-                {java === j.path && <Check className="size-3.5 text-primary" />}
-              </button>
-            ))}
-          </div>
+          ))}
         </div>
       </Row>
 

@@ -143,13 +143,23 @@ pub struct ContentUpdateInfo {
     pub new_version_number: String,
 }
 
-/// A JVM found on this machine.
+/// A usable JVM: a Mojang runtime Bananium downloaded, or one detected on
+/// the machine.
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct JavaInstall {
     #[cfg_attr(feature = "ts", ts(type = "string"))]
     pub path: PathBuf,
     pub major_version: u32,
+    /// `"mojang"` (downloaded into `java/`) or `"system"` (detected).
+    pub source: String,
+    /// Mojang runtime component, e.g. `"java-runtime-delta"`.
+    pub component: Option<String>,
+    /// Mojang runtime version, e.g. `"21.0.7"`.
+    pub version: Option<String>,
+    /// Disk used by a Mojang runtime.
+    #[cfg_attr(feature = "ts", ts(type = "number | null"))]
+    pub size_bytes: Option<u64>,
 }
 
 /// One screenshot file.
@@ -382,6 +392,23 @@ pub enum CommandOutput {
     },
     JavaListed {
         installs: Vec<JavaInstall>,
+    },
+    JavaRuntimeRemoved {
+        component: String,
+    },
+    /// The Mojang runtime an instance uses unless a Java is chosen for it.
+    InstanceJavaShown {
+        instance: String,
+        component: String,
+        major_version: Option<u32>,
+        /// Installed runtime version; `None` if not downloaded yet (it
+        /// downloads before the first launch).
+        installed_version: Option<String>,
+        /// Where its `java` executable is (or will be).
+        #[cfg_attr(feature = "ts", ts(type = "string"))]
+        path: PathBuf,
+        /// Whether Mojang publishes runtimes for this platform at all.
+        available: bool,
     },
     ScreenshotListed {
         screenshots: Vec<Screenshot>,

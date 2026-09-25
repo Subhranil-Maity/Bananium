@@ -87,10 +87,19 @@ milestone order — see the table below for exactly what each covers:
 - `File*` commands (`bananium-api/src/session/files.rs`) are a file manager
   over an instance's game directory; `resolve_game_path` is the single gate
   that refuses anything escaping it.
-- `bananium-java` only does system-JVM detection (`JAVA_HOME`/`PATH`/
-  `/usr/lib/jvm`). Mojang java-runtime auto-provisioning and the aarch64
-  Adoptium fallback are M3 work and are **not** implemented — if no system
-  JVM is found, `bananium launch` just errors.
+- **Java is Mojang's official runtime by default.** `bananium-java/src/
+  runtime.rs` models Mojang's java-runtime index + per-component manifests
+  and lays a tree out (dirs, files, `+x`, symlinks, then a
+  `.bananium-runtime.json` completion marker); `bananium-api/src/session/
+  java.rs` downloads it (raw files, SHA-1 verified, via the store) into
+  `<home>/java/<component>/`. `install` provisions the profile's
+  `javaVersion.component` up front; `launch` resolves Java as: instance
+  setting → global setting (an unrunnable choice is an error, never
+  silently swapped) → Mojang runtime (downloaded before spawning if
+  missing; dry runs don't download) → only where Mojang has no runtime for
+  the platform, a detected JVM of the exact major. System detection
+  (`find_all_java`) now only feeds the pickers. The aarch64-Linux Adoptium
+  fallback is **not** implemented.
 - No golden-file dry-run test matrix yet (PLAN.md calls this out as the
   highest-value test in the project — it doesn't exist yet, only ad hoc
   manual verification has been done).
@@ -121,7 +130,7 @@ those over this table if they ever disagree.
 | `bananium-store` | done for current needs | Content-addressed blob store, reflink→hardlink→copy materialization |
 | `bananium-instance` | ahead of M3 | Instances (clone/rename/remove, overrides, running pids), content lockfile, presets |
 | `bananium-launch` | done for current needs | Classpath dedup, native extraction, argument templating, offline UUIDs + profile store, `LaunchPlan` |
-| `bananium-java` | detection only | System JVM search (`find_java`, `find_all_java`). No Mojang runtime provisioning yet. |
+| `bananium-java` | Mojang runtimes + detection | Mojang java-runtime manifests and tree install (`runtime`); system JVM search (`find_all_java`) for pickers. No Adoptium fallback. |
 | `bananium-modrinth` | tested API client | v2 REST client used by `bananium-api`; no offline mirror |
 | `bananium-cli` | broad | clap frontend: install/launch/instance/profile/search/content/preset/java/screenshots |
 | `bananium-tui` | **first slice** | ratatui instance list + launch + RAM/JVM-args edit overlay; no live log pane/task tray/command palette yet |

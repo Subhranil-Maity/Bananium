@@ -1,10 +1,13 @@
 //! Mojang java-runtime provisioning and system JVM detection.
 //!
-//! M1 only needs the detection half of this — finding *a* usable JVM so
-//! `bananium launch` has something to exec. Downloading Mojang's own
-//! runtimes (`javaVersion.component` -> the java-runtime manifest -> a full
-//! file tree with `link`/`executable` handling) and the aarch64 Adoptium
-//! fallback are M3 work, described in PLAN.md but not implemented here yet.
+//! [`runtime`] models Mojang's official runtimes (`javaVersion.component`
+//! -> the java-runtime manifest -> a full file tree with `link`/`executable`
+//! handling) and lays them out on disk; downloading them is `bananium-api`'s
+//! job. The rest of this crate detects JVMs already on the machine, for
+//! users who pick their own. The aarch64-Linux Adoptium fallback PLAN.md
+//! describes is not implemented.
+
+pub mod runtime;
 
 use std::path::{Path, PathBuf};
 
@@ -14,6 +17,10 @@ pub enum Error {
         "no usable java runtime was found (checked JAVA_HOME, PATH, and common install locations)"
     )]
     NotFound,
+    #[error("io error: {0}")]
+    Io(#[from] std::io::Error),
+    #[error("java runtime manifest has an unsafe path {0:?}")]
+    BadRuntimePath(String),
 }
 
 pub type Result<T> = std::result::Result<T, Error>;

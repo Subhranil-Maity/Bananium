@@ -1,7 +1,6 @@
 import { useState } from "react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Copy, FileSearch, FolderInput, Loader2, Pencil, Trash2 } from "lucide-react";
-import { open } from "@tauri-apps/plugin-dialog";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { AlertTriangle, Copy, FolderInput, Loader2, Pencil, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
 import type { InstanceSummary } from "@/bindings/InstanceSummary";
@@ -11,8 +10,10 @@ import { Label } from "@/components/ui/label";
 import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
+import { JavaPicker } from "@/components/java-picker";
 import { Section } from "@/components/page";
 import { INSTANCES_KEY } from "@/hooks/use-instances";
+import { useInstanceJava, useJavaList } from "@/hooks/use-java";
 import { errorMessage, run } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { useInstanceDialogs } from "@/stores/instance-dialogs";
@@ -76,10 +77,39 @@ export function InstanceSettings({ instance }: { instance: InstanceSummary }) {
     onError: (err) => toast.error("Save failed", { description: errorMessage(err) }),
   });
 
-  async function browseJava() {
-    const picked = await open({ multiple: false, directory: false, title: "Choose a Java executable" });
-    if (typeof picked === "string") setJava(picked);
-  }
+  // What "default" means for this instance: the global Java setting if one
+  // is set, otherwise Mojang's runtime for this version.
+  const runtime = useInstanceJava(instance.slug);
+  const config = useQuery({
+    queryKey: ["config"],
+    queryFn: () => run({ command: "config_show" }, "config_shown"),
+  });
+  const { data: javas } = useJavaList();
+  const globalJava = config.data?.config.java_path ?? null;
+  const defaultJavaLabel = globalJava ? (
+    <span className="flex min-w-0 items-center gap-2">
+      <span className="font-medium">Global setting</span>
+      <span className="truncate font-mono text-[11px] text-muted-foreground">{globalJava}</span>
+    </span>
+  ) : (
+    <span className="flex items-center gap-2">
+      <span className="font-medium">
+        Mojang official{runtime.data?.major_version ? ` · Java ${runtime.data.major_version}` : ""}
+      </span>
+      <span className="text-muted-foreground">
+        {runtime.data
+          ? `${runtime.data.component} · ${runtime.data.installed_version ? `${runtime.data.installed_version}, downloaded` : "downloads before first launch"}`
+          : runtime.isLoading
+            ? "checking…"
+            : ""}
+      </span>
+    </span>
+  );
+  const pickedJava = java.trim() ? javas?.find((j) => j.path === java.trim()) : undefined;
+  const mismatch =
+    !!pickedJava &&
+    !!runtime.data?.major_version &&
+    pickedJava.major_version !== runtime.data.major_version;
 
   return (
     <div className="max-w-3xl space-y-4">
@@ -143,17 +173,15 @@ export function InstanceSettings({ instance }: { instance: InstanceSummary }) {
           </div>
         </Row>
 
-        <Row label="Java executable" hint="Overrides the global setting for this instance.">
-          <div className="flex gap-2">
-            <Input
-              placeholder="Use global setting / auto-detect"
-              value={java}
-              onChange={(e) => setJava(e.target.value)}
-              className="font-mono text-xs"
-            />
-            <Button variant="outline" size="icon" title="Browse" onClick={() => void browseJava()}>
-              <FileSearch />
-            </Button>
+        <Row label="Java" hint="Mojang's official runtime for this version unless you pick another.">
+          <div className="space-y-1.5">
+            <JavaPicker value={java.trim()} onChange={setJava} defaultLabel={defaultJavaLabel} />
+            {mismatch && (
+              <p className="flex items-center gap-1.5 text-xs text-warning">
+                <AlertTriangle className="size-3.5" /> Java {pickedJava!.major_version} selected; Minecraft{" "}
+                {instance.mc_version} expects Java {runtime.data!.major_version}.
+              </p>
+            )}
           </div>
         </Row>
 

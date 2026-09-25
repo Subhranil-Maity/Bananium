@@ -76,7 +76,9 @@ impl MetaClient {
     /// path. This ordering — network first, cache as fallback rather than
     /// cache-first — is what the offline gate actually depends on: it must
     /// degrade gracefully, not silently prefer stale data while connected.
-    pub(crate) async fn fetch_cached<T: DeserializeOwned>(
+    /// Public so other Mojang metadata (e.g. the java-runtime manifests,
+    /// whose types live in `bananium-java`) gets the same behavior.
+    pub async fn fetch_cached<T: DeserializeOwned>(
         &self,
         what: &'static str,
         url: &str,

@@ -34,6 +34,11 @@ void onEvent((event) => {
     return;
   }
   useTasks.getState().apply(event);
+  // Installs and launches may have just downloaded a Mojang Java runtime.
+  if (event.event === "task_completed") {
+    void queryClient.invalidateQueries({ queryKey: ["java-list"] });
+    void queryClient.invalidateQueries({ queryKey: ["instance-java"] });
+  }
 });
 
 // Hash routing: the production build is served from Tauri's custom

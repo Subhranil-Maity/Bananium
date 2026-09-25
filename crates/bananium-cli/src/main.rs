@@ -715,8 +715,38 @@ fn print_output(output: &CommandOutput, as_json: bool) {
         }
         CommandOutput::JavaListed { installs } => {
             for j in installs {
-                println!("java {:<4} {}", j.major_version, j.path.display());
+                let origin = match &j.component {
+                    Some(c) => format!("mojang:{c}"),
+                    None => j.source.clone(),
+                };
+                println!(
+                    "java {:<4} {:<28} {}",
+                    j.major_version,
+                    origin,
+                    j.path.display()
+                );
             }
+        }
+        CommandOutput::JavaRuntimeRemoved { component } => {
+            println!("removed Mojang runtime {component}")
+        }
+        CommandOutput::InstanceJavaShown {
+            instance,
+            component,
+            major_version,
+            installed_version,
+            path,
+            ..
+        } => {
+            let major = major_version
+                .map(|m| format!(" (Java {m})"))
+                .unwrap_or_default();
+            let state = match installed_version {
+                Some(v) => format!("installed {v}"),
+                None => "downloads before first launch".to_string(),
+            };
+            println!("{instance}: {component}{major}, {state}");
+            println!("  {}", path.display());
         }
         CommandOutput::ScreenshotListed { screenshots } => {
             for s in screenshots {
