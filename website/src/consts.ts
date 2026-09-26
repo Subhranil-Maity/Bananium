@@ -3,7 +3,7 @@ export const SITE_TITLE = 'Bananium';
 export const SITE_TAGLINE = 'The Banana Launcher';
 export const SITE_DESCRIPTION =
   'A fast, lightweight Minecraft launcher. Instances, Fabric, Modrinth mods, shaders, resource packs, and modpacks, with a Rust core that stays out of your RAM\'s way.';
-export const VERSION = '0.1.0';
+export const VERSION = '0.1.1';
 
 export const REPO_URL = 'https://github.com/Subhranil-Maity/Bananium';
 export const AUTHOR_NAME = 'Subhranil Maity';

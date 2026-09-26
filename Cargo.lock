@@ -308,7 +308,7 @@ checksum = "f2032f911046de80f0a198e0901378627c33f59ea0ac00e363d481118bd70a53"
 
 [[package]]
 name = "bananium-api"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "bananium-core",
  "bananium-discord",
@@ -332,7 +332,7 @@ dependencies = [
 
 [[package]]
 name = "bananium-cli"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "bananium-api",
  "clap",
@@ -342,7 +342,7 @@ dependencies = [
 
 [[package]]
 name = "bananium-core"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "chrono",
  "dirs 5.0.1",
@@ -357,7 +357,7 @@ dependencies = [
 
 [[package]]
 name = "bananium-desktop"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "bananium-api",
  "serde_json",
@@ -371,7 +371,7 @@ dependencies = [
 
 [[package]]
 name = "bananium-discord"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "serde",
  "serde_json",
@@ -382,7 +382,7 @@ dependencies = [
 
 [[package]]
 name = "bananium-instance"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "bananium-core",
  "serde",
@@ -398,7 +398,7 @@ dependencies = [
 
 [[package]]
 name = "bananium-java"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "serde",
  "serde_json",
@@ -409,7 +409,7 @@ dependencies = [
 
 [[package]]
 name = "bananium-launch"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "bananium-core",
  "bananium-meta",
@@ -428,7 +428,7 @@ dependencies = [
 
 [[package]]
 name = "bananium-meta"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "bananium-core",
  "bananium-net",
@@ -444,7 +444,7 @@ dependencies = [
 
 [[package]]
 name = "bananium-modrinth"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "futures-util",
  "reqwest 0.12.28",
@@ -458,7 +458,7 @@ dependencies = [
 
 [[package]]
 name = "bananium-net"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "bananium-core",
  "bytes",
@@ -476,11 +476,11 @@ dependencies = [
 
 [[package]]
 name = "bananium-rpc"
-version = "0.1.0"
+version = "0.1.1"
 
 [[package]]
 name = "bananium-store"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "bananium-core",
  "reflink-copy",
@@ -492,7 +492,7 @@ dependencies = [
 
 [[package]]
 name = "bananium-tui"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "bananium-api",
  "crossterm",

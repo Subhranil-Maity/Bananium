@@ -30,7 +30,7 @@ clean desktop app that stays out of your RAM's way.
 - **Smart mod installs.** Required dependencies come along automatically, with
   version picks that don't break each other.
 
-> **Status:** early development (v0.1.0). Vanilla and Fabric are tested on
+> **Status:** early development (v0.1.1). Vanilla and Fabric are tested on
 > Windows 11 and Linux x86_64. Fabric is the only mod loader supported so far.
 
 ---
