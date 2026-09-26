@@ -565,24 +565,9 @@ fn playing(game: &Game, others: usize, config: &DiscordConfig) -> Activity {
     } else {
         version.clone()
     };
-    let loader_art = loader_art(info.loader);
-    match info.icon_url.as_ref().filter(|_| config.show_modpack_icon) {
-        Some(icon) => {
-            a = a
-                .large_image(icon.clone(), Some(tooltip))
-                .small_image(loader_art.url(), Some(loader_label(info, true)));
-        }
-        None if info.loader == Loader::Vanilla => {
-            a = a
-                .large_image(loader_art.url(), Some(tooltip))
-                .small_image(Art::Bananium.url(), Some(launcher_label()));
-        }
-        None => {
-            a = a
-                .large_image(loader_art.url(), Some(tooltip))
-                .small_image(Art::Minecraft.url(), Some(version));
-        }
-    }
+    a = a.large_image(large_art(info, config), Some(tooltip));
+    let (badge, badge_text) = small_art(info, config);
+    a = a.small_image(badge, Some(badge_text));
     if let (Some(project), true) = (&info.modrinth_project, config.show_buttons) {
         a = a.button(
             "View modpack",
@@ -684,12 +669,9 @@ fn launcher(model: &Model, config: &DiscordConfig) -> Activity {
             if !parts.is_empty() {
                 a = a.state(parts.join(" · "));
             }
-            let image = info
-                .icon_url
-                .clone()
-                .filter(|_| config.show_modpack_icon)
-                .unwrap_or_else(|| loader_art(info.loader).url());
-            a.large_image(image, Some(launcher_label()))
+            let (badge, badge_text) = small_art(info, config);
+            a.large_image(large_art(info, config), Some(info.name.clone()))
+                .small_image(badge, Some(badge_text))
         }
         View::Library => idle(&plural(model.instance_count, "instance")),
         View::Presets => idle("Managing presets"),
@@ -721,10 +703,24 @@ fn kind_label(kind: &str) -> &'static str {
     }
 }
 
-fn loader_art(loader: Loader) -> Art {
-    match loader {
-        Loader::Vanilla => Art::Minecraft,
-        Loader::Fabric => Art::Fabric,
+/// The large image for an instance: its modpack's own icon, else the
+/// grass block (Minecraft itself).
+fn large_art(info: &InstanceInfo, config: &DiscordConfig) -> String {
+    info.icon_url
+        .clone()
+        .filter(|_| config.show_modpack_icon)
+        .unwrap_or_else(|| Art::Minecraft.url())
+}
+
+/// The small badge for an instance, with its tooltip: the mod loader's
+/// logo, or Bananium's for vanilla (or when the loader is hidden).
+fn small_art(info: &InstanceInfo, config: &DiscordConfig) -> (String, String) {
+    match info.loader {
+        Loader::Fabric if config.show_loader => (
+            Art::Fabric.url(),
+            loader_label(info, config.show_loader_version),
+        ),
+        _ => (Art::Bananium.url(), launcher_label()),
     }
 }
 
@@ -868,9 +864,10 @@ mod tests {
             Some("Fabric 0.16.9 · 49 mods · as Steve")
         );
         let assets = a.assets.unwrap();
-        assert_eq!(assets.large_image, Some(Art::Fabric.url()));
+        assert_eq!(assets.large_image, Some(Art::Minecraft.url()));
         assert_eq!(assets.large_text.as_deref(), Some("Survival SMP"));
-        assert_eq!(assets.small_image, Some(Art::Minecraft.url()));
+        assert_eq!(assets.small_image, Some(Art::Fabric.url()));
+        assert_eq!(assets.small_text.as_deref(), Some("Fabric 0.16.9"));
         assert_eq!(a.timestamps.unwrap().start, Some(NOW - 1000));
         assert_eq!(a.buttons.len(), 1);
     }
@@ -908,8 +905,10 @@ mod tests {
         assert_eq!(a.timestamps, None);
         assert!(a.buttons.is_empty());
         let assets = a.assets.unwrap();
-        assert_eq!(assets.large_image, Some(Art::Fabric.url()));
+        assert_eq!(assets.large_image, Some(Art::Minecraft.url()));
         assert_eq!(assets.large_text.as_deref(), Some("Minecraft 1.21.1"));
+        // With the loader hidden, the badge mustn't give Fabric away.
+        assert_eq!(assets.small_image, Some(Art::Bananium.url()));
     }
 
     #[test]
