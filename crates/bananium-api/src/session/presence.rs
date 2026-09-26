@@ -279,6 +279,10 @@ impl Presence {
     fn set_status(&self, status: PresenceStatus, events: &broadcast::Sender<Event>) {
         let mut current = self.status.lock().expect("presence status poisoned");
         if *current != status {
+            // Waiting -> Waiting (a new retry time) isn't worth a line.
+            if std::mem::discriminant(&*current) != std::mem::discriminant(&status) {
+                tracing::info!("discord presence: {status:?}");
+            }
             *current = status.clone();
             let _ = events.send(Event::PresenceStatusChanged { status });
         }

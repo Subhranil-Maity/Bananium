@@ -121,6 +121,7 @@ impl Session {
     /// `Command::InstanceRemove`.
     pub(super) fn instance_remove(&self, instance: &str) -> Result<CommandOutput> {
         self.instances().remove(instance)?;
+        tracing::info!("removed instance {instance:?}");
         Ok(CommandOutput::InstanceRemoved {
             instance: instance.to_string(),
         })
@@ -129,6 +130,7 @@ impl Session {
     /// `Command::InstanceRename`.
     pub(super) fn instance_rename(&self, instance: &str, new_name: &str) -> Result<CommandOutput> {
         let slug = self.instances().rename(instance, new_name)?;
+        tracing::info!("renamed instance {instance:?} to {slug:?}");
         Ok(CommandOutput::InstanceRenamed {
             old: instance.to_string(),
             instance: slug,
@@ -138,6 +140,7 @@ impl Session {
     /// `Command::InstanceClone`.
     pub(super) fn instance_clone(&self, instance: &str, new_name: &str) -> Result<CommandOutput> {
         let slug = self.instances().clone_instance(instance, new_name)?;
+        tracing::info!("cloned instance {instance:?} as {slug:?}");
         Ok(CommandOutput::InstanceCloned {
             source: instance.to_string(),
             instance: slug,
@@ -155,6 +158,7 @@ impl Session {
             .remove(instance);
         match kill {
             Some(tx) => {
+                tracing::info!("stopping instance {instance:?} on request");
                 let _ = tx.send(());
                 Ok(CommandOutput::InstanceKilled {
                     instance: instance.to_string(),

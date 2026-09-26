@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { FolderOpen, Loader2, Moon, Sun, Trash2 } from "lucide-react";
+import { FolderOpen, Loader2, Moon, Sun, Terminal, Trash2 } from "lucide-react";
+import { Link } from "react-router";
 import { openPath } from "@tauri-apps/plugin-opener";
 import { toast } from "sonner";
 
@@ -176,7 +177,13 @@ export function SettingsPage() {
 
   return (
     <Page className="max-w-4xl">
-      <PageHeader title="Settings" />
+      <PageHeader title="Settings">
+        <Button variant="outline" size="sm" asChild>
+          <Link to="/console">
+            <Terminal /> Console
+          </Link>
+        </Button>
+      </PageHeader>
       <div className="space-y-4">
         <Section title="Appearance">
           <Row label="Theme">
@@ -212,6 +219,7 @@ export function SettingsPage() {
                 <PathRow label="Content store" value={data.paths.store_dir} />
                 <PathRow label="Assets" value={data.paths.assets_dir} />
                 <PathRow label="config.toml" value={data.paths.config_toml} />
+                <PathRow label="Launcher logs" value={data.paths.logs_dir} />
               </div>
             </Section>
           </>

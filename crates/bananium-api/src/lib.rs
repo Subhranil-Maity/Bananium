@@ -13,8 +13,8 @@ pub use error::{Error, Result};
 pub use event::Event;
 pub use output::{
     CommandOutput, ContentUpdateInfo, FabricLoaderSummary, FileEntry, GalleryItem, InstanceSummary,
-    JavaInstall, LogFile, ModpackSummary, ModrinthHit, ModrinthProject, ModrinthVersion,
-    ProfileSummary, ResolvedPaths, Screenshot, SkippedEntry, VersionSummary,
+    JavaInstall, LauncherLogFile, LogFile, LogStatus, ModpackSummary, ModrinthHit, ModrinthProject,
+    ModrinthVersion, ProfileSummary, ResolvedPaths, Screenshot, SkippedEntry, VersionSummary,
 };
 pub use presence::{
     LauncherView, PresencePreview, PresenceStatus, PreviewButton, PreviewScenario, DISCORD_APP_ID,
@@ -37,7 +37,17 @@ pub use bananium_instance::is_valid_name as is_valid_instance_name;
 /// frontends can name them while depending on only `bananium-api`.
 pub use bananium_instance::{ContentEntry, ContentKind, Preset, PresetEntry};
 
-/// Initialize `tracing` for a binary frontend. See `bananium_core::logging`.
-pub fn init_logging() {
-    bananium_core::logging::init();
+pub use bananium_core::logging::LogOptions;
+
+/// Initialize `tracing` for a binary frontend: this run's log file under
+/// `<home>/logs`, the panic hook, and optionally stderr. Returns the log
+/// file's path. See `bananium_core::logging`.
+pub fn init_logging(paths: &Paths, opts: LogOptions) -> Option<std::path::PathBuf> {
+    bananium_core::logging::init(paths, opts)
+}
+
+/// Log the clean-shutdown marker. Frontends call this right before exiting
+/// on purpose; a log without it is reported as a crash or unclean exit.
+pub fn log_shutdown(reason: &str) {
+    bananium_core::logging::shutdown(reason);
 }

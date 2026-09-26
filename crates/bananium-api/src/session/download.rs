@@ -30,15 +30,24 @@ impl Session {
         task_id: &str,
         f: impl std::future::Future<Output = Result<T>>,
     ) -> Result<T> {
+        tracing::info!(task = task_id, "task started");
+        let started = Instant::now();
         let result = f.await;
+        let secs = started.elapsed().as_secs_f32();
         match &result {
-            Ok(_) => self.emit(Event::TaskCompleted {
-                task_id: task_id.to_string(),
-            }),
-            Err(err) => self.emit(Event::TaskFailed {
-                task_id: task_id.to_string(),
-                error: err.to_string(),
-            }),
+            Ok(_) => {
+                tracing::info!(task = task_id, "task finished in {secs:.1}s");
+                self.emit(Event::TaskCompleted {
+                    task_id: task_id.to_string(),
+                })
+            }
+            Err(err) => {
+                tracing::error!(task = task_id, "task failed after {secs:.1}s: {err}");
+                self.emit(Event::TaskFailed {
+                    task_id: task_id.to_string(),
+                    error: err.to_string(),
+                })
+            }
         }
         result
     }
@@ -127,6 +136,16 @@ impl Session {
             files_done: total - failures.len(),
             files_total: total,
         });
+        tracing::info!(
+            task = task_id,
+            "{label}: {} of {total} files ready, {} bytes fetched in {:.1}s",
+            total - failures.len(),
+            done,
+            started.elapsed().as_secs_f32()
+        );
+        for failure in failures.iter().take(5) {
+            tracing::error!(task = task_id, "download failed: {failure}");
+        }
         match failures.first() {
             Some(first) => Err(Error::DownloadsFailed(failures.len(), total, first.clone())),
             None => Ok(()),

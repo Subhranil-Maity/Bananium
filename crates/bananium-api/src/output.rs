@@ -16,6 +16,8 @@ pub struct ResolvedPaths {
     pub instances_dir: PathBuf,
     pub java_dir: PathBuf,
     pub assets_dir: PathBuf,
+    /// The launcher's own logs, one per run.
+    pub logs_dir: PathBuf,
 }
 
 /// One instance's summary, as surfaced by `Command::InstanceList` — enough
@@ -224,6 +226,41 @@ pub struct LogFile {
     pub modified_unix: u64,
 }
 
+/// How a launcher run ended, read back from its log file.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
+#[serde(rename_all = "snake_case")]
+pub enum LogStatus {
+    /// This process's own log.
+    Running,
+    /// Ended with the clean-shutdown marker.
+    Closed,
+    /// Ended with a panic.
+    Crashed,
+    /// Ended with neither: killed, power loss, or a crash that couldn't be
+    /// logged.
+    Unclean,
+}
+
+/// One launcher log file, as listed by `Command::LauncherLogList`.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
+pub struct LauncherLogFile {
+    /// File name (`YYYY-MM-DD_HH-MM-SS[_n].log`); pass back as
+    /// `LauncherLogRead::file`.
+    pub name: String,
+    #[cfg_attr(feature = "ts", ts(type = "string"))]
+    pub path: PathBuf,
+    #[cfg_attr(feature = "ts", ts(type = "number"))]
+    pub size: u64,
+    #[cfg_attr(feature = "ts", ts(type = "number"))]
+    pub modified_unix: u64,
+    pub status: LogStatus,
+    /// One line on how it ended ("Closed: ...", "Crashed: ...", ...);
+    /// `None` while running.
+    pub reason: Option<String>,
+}
+
 /// What a modpack needs, read from its `modrinth.index.json`.
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
@@ -345,6 +382,32 @@ pub enum CommandOutput {
     FileImported {
         count: u32,
     },
+    LauncherLogListed {
+        /// This run's log file name, if it has one.
+        current: Option<String>,
+        logs: Vec<LauncherLogFile>,
+    },
+    LauncherLogChunk {
+        /// Which log was read; `None` when there is none.
+        file: Option<String>,
+        text: String,
+        /// Byte range of `text` in the file: pass `end` back as `offset`
+        /// to follow the log, `start` as `before` to page backwards.
+        #[cfg_attr(feature = "ts", ts(type = "number"))]
+        start: u64,
+        #[cfg_attr(feature = "ts", ts(type = "number"))]
+        end: u64,
+        /// The file's size when it was read.
+        #[cfg_attr(feature = "ts", ts(type = "number"))]
+        size: u64,
+    },
+    /// `Command::LauncherLastSession`. `log` is `None` when this is the
+    /// first run (or the previous log was deleted).
+    LauncherLastSession {
+        log: Option<LauncherLogFile>,
+    },
+    /// `Command::LogFrontend` was written.
+    Logged,
     LogChunk {
         /// Which log was read; `None` when the instance has no logs yet.
         file: Option<String>,

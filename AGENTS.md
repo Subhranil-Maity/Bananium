@@ -104,6 +104,25 @@ milestone order — see the table below for exactly what each covers:
   must be pushed to `main`), copied into `desktop/public/discord/` for the
   settings preview; modpack/project icons are Modrinth CDN URLs (a modpack
   install now records `modrinth_project` + `modrinth_icon_url`).
+- **Launcher logging** (`bananium-core/src/logging.rs`, read back by
+  `bananium-api/src/session/logs.rs`): every run of any frontend writes
+  `<home>/logs/YYYY-MM-DD_HH-MM-SS.log` (`_1`, `_2`, ... when the name is
+  taken; the frontend is named in the startup banner, not the file name;
+  newest 50 kept). Lines are `date time [LEVEL] [target] message`; `debug`
+  in debug builds, `info` in release, `BANANIUM_LOG` overrides. Writes are
+  unbuffered on purpose: release builds `panic = "abort"`, and the panic
+  hook's `PANIC` line (message, location, backtrace) must reach disk. A run
+  ends with the `Bananium shutting down:` marker (`log_shutdown`); a log
+  without it is reported `unclean`, one with a panic `crashed`. The desktop
+  shows `/console` (Settings → Console) and, on start, a popup when its own
+  previous run crashed or didn't close properly (`LauncherLastSession`, run
+  in the background — never block startup on it). **Never send a whole log
+  over IPC**: `LauncherLogRead` returns ≤256 KiB line-trimmed chunks (tail,
+  follow by `offset`, page back by `before`). Webview errors reach the same
+  file via `LogFrontend`. `Session::dispatch` logs every command by name
+  (never contents); polled commands log at `trace` only, or the console
+  would log its own reads. Game exits are logged, and a non-zero exit is an
+  `error` naming the game log and any new crash report / `hs_err_pid*.log`.
 - `File*` commands (`bananium-api/src/session/files.rs`) are a file manager
   over an instance's game directory; `resolve_game_path` is the single gate
   that refuses anything escaping it.
@@ -143,7 +162,7 @@ those over this table if they ever disagree.
 
 | Crate | Status | Role |
 |---|---|---|
-| `bananium-core` | done for current needs | `Paths` (all on-disk locations), layered `Config` (+ `update_file`), shared `Error` taxonomy, `tracing` init |
+| `bananium-core` | done for current needs | `Paths` (all on-disk locations), layered `Config` (+ `update_file`), shared `Error` taxonomy, `tracing` init (per-run log file, panic hook, run-end classification) |
 | `bananium-api` | **The frontend facade** | `Command`, `Event`, `Session::dispatch`/`events`; `session/` has one module per area (content, presets, instances, logs, profiles, versions, system, download). Every frontend depends on *only* this crate. |
 | `bananium-net` | done for current needs | `HttpClient`, bounded-concurrency resumable `Downloader` |
 | `bananium-meta` | + Fabric | Mojang manifest/profile parsing, rule evaluation, asset index types, `MetaClient` (fetch-with-offline-fallback), Fabric loader metadata + profile merge |

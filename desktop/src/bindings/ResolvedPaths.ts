@@ -3,4 +3,8 @@
 /**
  * The subset of `Paths` surfaced to frontends, for `bananium config show`.
  */
-export type ResolvedPaths = { home: string, config_toml: string, store_dir: string, instances_dir: string, java_dir: string, assets_dir: string, };
+export type ResolvedPaths = { home: string, config_toml: string, store_dir: string, instances_dir: string, java_dir: string, assets_dir: string, 
+/**
+ * The launcher's own logs, one per run.
+ */
+logs_dir: string, };

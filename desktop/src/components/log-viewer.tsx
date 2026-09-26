@@ -33,14 +33,14 @@ const LATEST = "__latest__";
 /** Fixed row height (px) for unwrapped lines; wrapped rows are measured. */
 const ROW = 20;
 
-type Level = "info" | "warn" | "error";
+export type Level = "debug" | "info" | "warn" | "error";
 
-interface Line {
+export interface Line {
   /** 1-based line number in the loaded text. */
   n: number;
   raw: string;
   level: Level;
-  /** Parsed log4j header parts; absent for continuation/raw lines. */
+  /** Parsed header parts; absent for continuation/raw lines. */
   time?: string;
   thread?: string;
   tag?: string;
@@ -49,6 +49,22 @@ interface Line {
   /** Continuation of the previous entry (stack frames, wrapped output). */
   cont: boolean;
   chat: boolean;
+  /** A fatal error / crash line, highlighted beyond a plain error. */
+  fatal?: boolean;
+}
+
+/** Text loaded so far from one log, as produced by a tail hook. */
+export interface LogTail {
+  text: string;
+  /** Name of the file being shown; `null` when there is none. */
+  current: string | null;
+  loaded: boolean;
+  error: string | null;
+  /** Loads the chunk before what's shown; absent when nothing is older. */
+  loadOlder?: () => void;
+  loadingOlder?: boolean;
+  /** Bumped each time `loadOlder` prepends text; `lines` is how many. */
+  prepended?: { seq: number; lines: number };
 }
 
 // Vanilla: `[12:34:56] [Render thread/INFO]: msg`
@@ -62,7 +78,8 @@ function levelOf(tag: string): Level {
   return "info";
 }
 
-function parse(text: string): Line[] {
+/** Parses a Minecraft (log4j) game log. */
+function parseGameLog(text: string): Line[] {
   const lines = text.split(/\r?\n/);
   if (lines.at(-1) === "") lines.pop();
   let prev: Level = "info";
@@ -83,6 +100,7 @@ function parse(text: string): Line[] {
         message,
         cont: false,
         chat: message.includes("[CHAT]"),
+        fatal: m[3] === "FATAL",
       };
     }
     // Anything else continues the previous entry: stack traces inherit its
@@ -94,16 +112,19 @@ function parse(text: string): Line[] {
 }
 
 const LEVEL_TAG: Record<string, string> = {
+  debug: "text-sky-300/50",
   info: "text-white/40",
   warn: "text-amber-300",
   error: "text-red-400",
 };
 const LEVEL_TEXT: Record<Level, string> = {
+  debug: "text-console-foreground/55",
   info: "text-console-foreground",
   warn: "text-amber-100/95",
   error: "text-red-200",
 };
 const LEVEL_ROW: Record<Level, string> = {
+  debug: "",
   info: "",
   warn: "bg-amber-400/[0.06] shadow-[inset_2px_0_0_0_rgb(252_211_77/0.7)]",
   error: "bg-red-500/[0.09] shadow-[inset_2px_0_0_0_rgb(248_113_113/0.85)]",
@@ -147,7 +168,7 @@ const LogRow = memo(function LogRow({
       className={cn(
         "flex min-h-5 px-0 leading-5 hover:bg-white/[0.035]",
         LEVEL_ROW[line.level],
-        line.tag === "FATAL" && "bg-red-500/20",
+        line.fatal && "bg-red-500/20",
         current && "bg-primary/15 hover:bg-primary/15",
       )}
     >
@@ -160,11 +181,20 @@ const LogRow = memo(function LogRow({
         ) : (
           <>
             <span className="text-white/30">{line.time} </span>
-            <span className="text-sky-300/55">{line.thread}</span>
-            <span className="text-white/25">/</span>
-            <span className={cn("font-bold", LEVEL_TAG[line.level])}>{line.tag}</span>
-            <span className="text-white/25"> </span>
-            {line.logger && <span className="text-violet-300/70">({line.logger}) </span>}
+            {line.thread !== undefined ? (
+              <>
+                <span className="text-sky-300/55">{line.thread}</span>
+                <span className="text-white/25">/</span>
+                <span className={cn("font-bold", LEVEL_TAG[line.level])}>{line.tag}</span>
+                <span className="text-white/25"> </span>
+                {line.logger && <span className="text-violet-300/70">({line.logger}) </span>}
+              </>
+            ) : (
+              <>
+                <span className={cn("font-bold", LEVEL_TAG[line.level])}>[{line.tag}]</span>{" "}
+                {line.logger && <span className="text-violet-300/70">[{line.logger}] </span>}
+              </>
+            )}
             <span className={cn(LEVEL_TEXT[line.level], line.chat && "text-emerald-300")}>
               {highlight(line.message, query, current)}
             </span>
@@ -181,7 +211,7 @@ const LogRow = memo(function LogRow({
  * starts clean. `file === null` follows whichever log is newest, so a fresh
  * launch is picked up without reselecting.
  */
-function useLogTail(slug: string, file: string | null, follow: boolean) {
+function useLogTail(slug: string, file: string | null, follow: boolean): LogTail {
   const [text, setText] = useState("");
   const [current, setCurrent] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
@@ -258,37 +288,52 @@ function ToolButton({
 }
 
 const LEVEL_FILTERS: { level: Level; label: string; on: string }[] = [
+  { level: "debug", label: "Debug", on: "border-sky-300/30 bg-sky-300/10 text-sky-200" },
   { level: "info", label: "Info", on: "border-white/20 bg-white/10 text-white" },
   { level: "warn", label: "Warn", on: "border-amber-300/40 bg-amber-300/15 text-amber-200" },
   { level: "error", label: "Error", on: "border-red-400/50 bg-red-500/20 text-red-200" },
 ];
 
-function LogConsole({
-  slug,
-  file,
+/**
+ * A searchable, level-filtered, virtualized console over `tail`'s text.
+ * The data source is the caller's: an instance's game log or the
+ * launcher's own log, each with its own parser.
+ */
+export function LogConsole({
+  tail,
+  parse,
   live,
+  following,
   picker,
-  logs,
+  path,
+  empty,
+  banner,
   levels,
   setLevels,
   wrap,
   setWrap,
 }: {
-  slug: string;
-  file: string | null;
+  tail: LogTail;
+  parse: (text: string) => Line[];
   live: boolean;
+  /** Whether new lines keep arriving (changes the jump button's label). */
+  following: boolean;
   picker: ReactNode;
-  logs: LogFile[] | undefined;
+  /** The shown file on disk, for "open" / "show in folder". */
+  path: string | undefined;
+  /** Shown when there is no file at all. */
+  empty: ReactNode;
+  /** Optional strip above the lines (e.g. how an old run ended). */
+  banner?: ReactNode;
   levels: Set<Level>;
   setLevels: (l: Set<Level>) => void;
   wrap: boolean;
   setWrap: (w: boolean) => void;
 }) {
-  const following = live || file === null;
-  const { text, current, loaded, error } = useLogTail(slug, file, following);
-  const lines = useMemo(() => parse(text), [text]);
+  const { text, current, loaded, error } = tail;
+  const lines = useMemo(() => parse(text), [parse, text]);
   const counts = useMemo(() => {
-    const c = { info: 0, warn: 0, error: 0 };
+    const c = { debug: 0, info: 0, warn: 0, error: 0 };
     for (const l of lines) if (!l.cont) c[l.level]++;
     return c;
   }, [lines]);
@@ -315,6 +360,17 @@ function LogConsole({
     estimateSize: () => ROW,
     overscan: 30,
   });
+
+  // After older text is prepended, keep the lines that were on screen in
+  // place instead of jumping to the new top.
+  const prepended = tail.prepended;
+  useEffect(() => {
+    if (!prepended?.seq) return;
+    const at = visible.findIndex((l) => l.n > prepended.lines);
+    if (at > 0) virtualizer.scrollToIndex(at, { align: "start" });
+    // Only when a new chunk lands, not on every filter change.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [prepended?.seq]);
 
   // Follow the tail while pinned to the bottom; scrolling up unpins.
   useEffect(() => {
@@ -347,7 +403,6 @@ function LogConsole({
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
-  const path = logs?.find((l) => l.name === current)?.path;
   const toggleLevel = (level: Level) => {
     const next = new Set(levels);
     if (next.has(level)) next.delete(level);
@@ -370,7 +425,7 @@ function LogConsole({
         </span>
 
         <div className="mx-1 h-4 w-px bg-white/10" />
-        {LEVEL_FILTERS.map(({ level, label, on }) => (
+        {LEVEL_FILTERS.filter((f) => f.level !== "debug" || counts.debug > 0).map(({ level, label, on }) => (
           <button
             key={level}
             onClick={() => toggleLevel(level)}
@@ -456,9 +511,17 @@ function LogConsole({
             if (bottom !== atBottom) setAtBottom(bottom);
           }}
         >
+          {banner}
           {error && <p className="px-4 py-2 font-sans text-sm text-red-300">{error}</p>}
-          {loaded && !current && (
-            <p className="px-4 py-6 font-sans text-sm text-white/40">No launches yet. Logs appear here as soon as the game starts.</p>
+          {loaded && !current && <p className="px-4 py-6 font-sans text-sm text-white/40">{empty}</p>}
+          {tail.loadOlder && (
+            <button
+              onClick={tail.loadOlder}
+              disabled={tail.loadingOlder}
+              className="mx-auto my-1 flex items-center gap-1.5 rounded-full border border-white/15 px-3 py-1 font-sans text-xs text-white/70 transition-colors hover:bg-white/10 hover:text-white disabled:opacity-50"
+            >
+              <ChevronUp className="size-3.5" /> {tail.loadingOlder ? "Loading…" : "Load older lines"}
+            </button>
           )}
           <div className={cn("relative", !wrap && "min-w-max")} style={{ height: virtualizer.getTotalSize() }}>
             {virtualizer.getVirtualItems().map((row) => (
@@ -507,6 +570,7 @@ export function LogViewer({ slug, live }: { slug: string; live: boolean }) {
     refetchInterval: live ? 3000 : false,
   });
   const file = selected === LATEST ? null : selected;
+  const following = live || file === null;
 
   const picker = (
     <Select value={selected} onValueChange={setSelected}>
@@ -532,17 +596,50 @@ export function LogViewer({ slug, live }: { slug: string; live: boolean }) {
   );
 
   return (
-    <LogConsole
+    <GameLogConsole
       key={`${slug}:${selected}`}
       slug={slug}
       file={file}
       live={live}
+      following={following}
       picker={picker}
       logs={logs}
       levels={levels}
       setLevels={setLevels}
       wrap={wrap}
       setWrap={setWrap}
+    />
+  );
+}
+
+/** Tails one game log; remounted (via `key`) when the selection changes. */
+function GameLogConsole({
+  slug,
+  file,
+  following,
+  logs,
+  ...rest
+}: {
+  slug: string;
+  file: string | null;
+  live: boolean;
+  following: boolean;
+  picker: ReactNode;
+  logs: LogFile[] | undefined;
+  levels: Set<Level>;
+  setLevels: (l: Set<Level>) => void;
+  wrap: boolean;
+  setWrap: (w: boolean) => void;
+}) {
+  const tail = useLogTail(slug, file, following);
+  return (
+    <LogConsole
+      {...rest}
+      tail={tail}
+      parse={parseGameLog}
+      following={following}
+      path={logs?.find((l) => l.name === tail.current)?.path}
+      empty="No launches yet. Logs appear here as soon as the game starts."
     />
   );
 }

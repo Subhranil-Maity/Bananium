@@ -98,6 +98,9 @@ impl MetaClient {
             }
             Err(net_err) => {
                 if cache_path.is_file() {
+                    tracing::warn!(
+                        "fetching {what} failed ({net_err}); using the cached copy of {url}"
+                    );
                     let bytes = tokio::fs::read(cache_path).await?;
                     serde_json::from_slice(&bytes).map_err(|source| Error::Parse {
                         what,
@@ -105,6 +108,9 @@ impl MetaClient {
                         source,
                     })
                 } else {
+                    tracing::error!(
+                        "fetching {what} failed ({net_err}) and nothing is cached for {url}"
+                    );
                     Err(net_err.into())
                 }
             }

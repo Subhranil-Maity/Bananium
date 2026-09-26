@@ -101,10 +101,16 @@ impl Session {
         let index = match self.runtime_index().await {
             Ok(index) => index,
             // Offline with no cached index: an installed runtime still works.
-            Err(_) if installed.is_some() => return Ok(Some(runtime::java_executable(&dir))),
+            Err(err) if installed.is_some() => {
+                tracing::warn!(
+                    "Java runtime index unavailable ({err}); using the installed {component}"
+                );
+                return Ok(Some(runtime::java_executable(&dir)));
+            }
             Err(err) => return Err(err),
         };
         let Some(release) = runtime::release_for(&index, component) else {
+            tracing::info!("Mojang has no {component} runtime for this platform");
             return Ok(installed.map(|_| runtime::java_executable(&dir)));
         };
         if installed
@@ -142,6 +148,10 @@ impl Session {
             })
             .collect();
         let version = release.version.name.clone();
+        tracing::info!(
+            "downloading Java {version} ({component}, {} files)",
+            specs.len()
+        );
         self.download_tracked(
             task_id,
             &format!("Java {version} (Mojang {component})"),
@@ -161,6 +171,7 @@ impl Session {
                 .map(|_| ())
                 .map_err(std::io::Error::other)
         })?;
+        tracing::info!("installed Java {} ({component})", marker.version);
         Ok(Some(runtime::java_executable(&dir)))
     }
 
@@ -184,6 +195,7 @@ impl Session {
             .clone()
             .or_else(|| self.config().java_path.clone());
         if let Some(path) = chosen {
+            tracing::info!("using the Java chosen in settings: {}", path.display());
             let probe = path.clone();
             let found = tokio::task::spawn_blocking(move || bananium_java::probe_java(&probe))
                 .await
@@ -215,6 +227,9 @@ impl Session {
         // No Mojang runtime for this platform: fall back to a detected JVM
         // of exactly the major version the game expects.
         let wanted = major;
+        tracing::warn!(
+            "no Mojang {component} runtime for this platform; looking for a system Java {major:?}"
+        );
         let system = tokio::task::spawn_blocking(bananium_java::find_all_java)
             .await
             .unwrap_or_default();

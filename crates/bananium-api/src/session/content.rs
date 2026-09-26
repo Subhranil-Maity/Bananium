@@ -465,6 +465,7 @@ impl Session {
                     .find(|(_, p)| declares_incompatible(p, &v.project_id, &v.id))
                 {
                     conflict = format!("{title} is incompatible with {project}");
+                    tracing::debug!("skipping {project} {}: {conflict}", v.version_number);
                     continue;
                 }
                 if let Some((title, _)) = present
@@ -475,14 +476,23 @@ impl Session {
                         "{project} {} is incompatible with {title}",
                         v.version_number
                     );
+                    tracing::debug!("skipping: {conflict}");
                     continue;
                 }
                 chosen = Some(v);
                 break;
             }
             let Some(v) = chosen else {
+                tracing::warn!(instance, "refusing to install {project}: {conflict}");
                 return Err(Error::Incompatible(conflict));
             };
+            tracing::info!(
+                instance,
+                dependency,
+                "picked {project} {} ({}) for {kind:?}",
+                v.version_number,
+                v.id
+            );
 
             seen.insert(v.project_id.clone());
             for dep in &v.dependencies {
@@ -571,6 +581,7 @@ impl Session {
         filename: &str,
     ) -> Result<CommandOutput> {
         self.content().remove(instance, kind, filename)?;
+        tracing::info!(instance, "removed {kind:?} {filename}");
         Ok(CommandOutput::ContentRemoved {
             instance: instance.to_string(),
             filename: filename.to_string(),
@@ -587,6 +598,7 @@ impl Session {
     ) -> Result<CommandOutput> {
         self.content()
             .set_enabled(instance, kind, filename, enabled)?;
+        tracing::info!(instance, enabled, "toggled {kind:?} {filename}");
         Ok(CommandOutput::ContentToggled {
             instance: instance.to_string(),
             filename: filename.to_string(),

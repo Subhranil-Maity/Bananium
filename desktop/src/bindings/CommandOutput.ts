@@ -6,6 +6,7 @@ import type { FabricLoaderSummary } from "./FabricLoaderSummary";
 import type { FileEntry } from "./FileEntry";
 import type { InstanceSummary } from "./InstanceSummary";
 import type { JavaInstall } from "./JavaInstall";
+import type { LauncherLogFile } from "./LauncherLogFile";
 import type { LogFile } from "./LogFile";
 import type { ModpackSummary } from "./ModpackSummary";
 import type { ModrinthHit } from "./ModrinthHit";
@@ -43,7 +44,24 @@ instance: string, } | { "result": "instance_killed", instance: string, } | { "re
 /**
  * The listed folder, normalised (no leading/trailing `/`).
  */
-path: string, entries: Array<FileEntry>, } | { "result": "file_contents", path: string, text: string, } | { "result": "file_written", path: string, } | { "result": "file_deleted", path: string, } | { "result": "file_imported", count: number, } | { "result": "log_chunk", 
+path: string, entries: Array<FileEntry>, } | { "result": "file_contents", path: string, text: string, } | { "result": "file_written", path: string, } | { "result": "file_deleted", path: string, } | { "result": "file_imported", count: number, } | { "result": "launcher_log_listed", 
+/**
+ * This run's log file name, if it has one.
+ */
+current: string | null, logs: Array<LauncherLogFile>, } | { "result": "launcher_log_chunk", 
+/**
+ * Which log was read; `None` when there is none.
+ */
+file: string | null, text: string, 
+/**
+ * Byte range of `text` in the file: pass `end` back as `offset`
+ * to follow the log, `start` as `before` to page backwards.
+ */
+start: number, end: number, 
+/**
+ * The file's size when it was read.
+ */
+size: number, } | { "result": "launcher_last_session", log: LauncherLogFile | null, } | { "result": "logged" } | { "result": "log_chunk", 
 /**
  * Which log was read; `None` when the instance has no logs yet.
  */

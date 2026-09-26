@@ -284,7 +284,15 @@ impl Session {
             icon_url.clone(),
         );
         let summary = index.summary();
+        tracing::info!(
+            "installing modpack {} {} (Minecraft {}, {} files)",
+            index.name,
+            index.version_id,
+            summary.mc_version,
+            index.files.len()
+        );
         if let Some(reason) = summary.unsupported {
+            tracing::warn!("refusing modpack {}: {reason}", index.name);
             return Err(Error::UnsupportedModpack(reason));
         }
 

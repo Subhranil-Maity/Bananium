@@ -321,6 +321,7 @@ dependencies = [
  "bananium-store",
  "serde",
  "serde_json",
+ "strum",
  "tempfile",
  "thiserror 2.0.20",
  "tokio",
@@ -343,6 +344,7 @@ dependencies = [
 name = "bananium-core"
 version = "0.1.0"
 dependencies = [
+ "chrono",
  "dirs 5.0.1",
  "serde",
  "tempfile",
@@ -364,6 +366,7 @@ dependencies = [
  "tauri-plugin-dialog",
  "tauri-plugin-opener",
  "tokio",
+ "tracing",
 ]
 
 [[package]]
@@ -387,6 +390,7 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.20",
  "toml 0.8.2",
+ "tracing",
  "ts-rs",
  "uuid",
  "windows-sys 0.59.0",
@@ -435,6 +439,7 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.20",
  "tokio",
+ "tracing",
 ]
 
 [[package]]

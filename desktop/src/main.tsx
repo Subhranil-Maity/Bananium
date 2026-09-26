@@ -15,8 +15,10 @@ import { PresetsPage } from "@/routes/presets";
 import { ScreenshotsPage } from "@/routes/screenshots";
 import { SettingsPage } from "@/routes/settings";
 import { AboutPage } from "@/routes/about";
+import { ConsolePage } from "@/routes/console";
+import { RouteError } from "@/components/route-error";
 import { INSTANCES_KEY } from "@/hooks/use-instances";
-import { onEvent } from "@/lib/api";
+import { describeError, logToBackend, onEvent } from "@/lib/api";
 import { PRESENCE_STATUS_KEY } from "@/lib/presence";
 import { useTasks } from "@/stores/tasks";
 
@@ -26,6 +28,14 @@ const queryClient = new QueryClient({
     // and a failed command should surface immediately.
     queries: { retry: false, refetchOnWindowFocus: false },
   },
+});
+
+// Uncaught webview errors go into the launcher log, next to the backend's.
+window.addEventListener("error", (e) => {
+  logToBackend("error", `uncaught error: ${describeError(e.error ?? e.message)} (${e.filename}:${e.lineno})`);
+});
+window.addEventListener("unhandledrejection", (e) => {
+  logToBackend("error", `unhandled promise rejection: ${describeError(e.reason)}`);
 });
 
 // One global subscription: task events feed the tray; a game exiting
@@ -52,6 +62,7 @@ void onEvent((event) => {
 const router = createHashRouter([
   {
     element: <AppShell />,
+    errorElement: <RouteError />,
     children: [
       { index: true, element: <LibraryPage /> },
       { path: "instance/:slug", element: <InstancePage /> },
@@ -61,6 +72,7 @@ const router = createHashRouter([
       { path: "accounts", element: <AccountsPage /> },
       { path: "about", element: <AboutPage /> },
       { path: "settings", element: <SettingsPage /> },
+      { path: "console", element: <ConsolePage /> },
     ],
   },
 ]);

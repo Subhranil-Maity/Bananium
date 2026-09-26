@@ -226,9 +226,21 @@ enum ConfigAction {
 
 #[tokio::main]
 async fn main() -> std::process::ExitCode {
-    bananium_api::init_logging();
+    // Parse first: `--help` and usage errors exit inside `parse` and
+    // shouldn't leave a log that looks like a crashed run.
     let cli = Cli::parse();
-    run_cli(cli.command, cli.format_json).await
+    if let Ok(paths) = Paths::resolve() {
+        bananium_api::init_logging(
+            &paths,
+            bananium_api::LogOptions {
+                frontend: "cli",
+                stderr: true,
+            },
+        );
+    }
+    let code = run_cli(cli.command, cli.format_json).await;
+    bananium_api::log_shutdown("command finished");
+    code
 }
 
 async fn run_cli(command: Cmd, format_json: bool) -> std::process::ExitCode {
@@ -827,6 +839,28 @@ fn print_output(output: &CommandOutput, as_json: bool) {
         CommandOutput::LogChunk { text, .. } => {
             print!("{text}");
         }
+        CommandOutput::LauncherLogListed { logs, .. } => {
+            for log in logs {
+                println!(
+                    "{:<28} {:>10}  {}",
+                    log.name,
+                    format_bytes(log.size),
+                    log.reason.as_deref().unwrap_or("running")
+                );
+            }
+        }
+        CommandOutput::LauncherLogChunk { text, .. } => {
+            print!("{text}");
+        }
+        CommandOutput::LauncherLastSession { log } => match log {
+            Some(log) => println!(
+                "{}: {}",
+                log.name,
+                log.reason.as_deref().unwrap_or("running")
+            ),
+            None => println!("no previous session"),
+        },
+        CommandOutput::Logged => {}
         CommandOutput::FileListed { entries, .. } => {
             for e in entries {
                 let size = if e.is_dir {

@@ -41,9 +41,10 @@ pub enum ModpackSource {
 /// Every action a frontend can ask for. New variants land milestone by
 /// milestone; nothing outside `bananium-api` may add capability that isn't
 /// expressed here first (see the frontend contract in CONTRIBUTING.md).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, strum::IntoStaticStr)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 #[serde(tag = "command", rename_all = "snake_case")]
+#[strum(serialize_all = "snake_case")]
 pub enum Command {
     /// Print the resolved config and paths.
     ConfigShow,
@@ -423,4 +424,35 @@ pub enum Command {
     /// Try reaching Discord right now instead of at the next retry
     /// (or reconnect, when already connected).
     PresenceReconnect,
+    /// Every launcher log (one per run of any frontend), newest first.
+    LauncherLogList,
+    /// One chunk (at most 256 KiB, trimmed to whole lines) of a launcher
+    /// log; `file: None` is this run's log. Never the whole file: logs grow
+    /// large and go over IPC.
+    ///
+    /// - `before: None, offset: 0`: the file's tail.
+    /// - `before: None, offset: n`: from byte `n` on — poll with the last
+    ///   chunk's `end` to follow a growing log.
+    /// - `before: Some(n)`: the chunk ending at byte `n` — pass the first
+    ///   chunk's `start` to page backwards.
+    LauncherLogRead {
+        #[serde(default)]
+        file: Option<String>,
+        #[serde(default)]
+        #[cfg_attr(feature = "ts", ts(type = "number"))]
+        offset: u64,
+        #[serde(default)]
+        #[cfg_attr(feature = "ts", ts(type = "number | null"))]
+        before: Option<u64>,
+    },
+    /// How the previous launcher run ended, read from the tail of its log
+    /// only, so a frontend can warn after a crash without slowing startup.
+    LauncherLastSession,
+    /// Write a line from the frontend (e.g. an uncaught webview error) into
+    /// the launcher log under the `webview` target. `level` is `error`,
+    /// `warn`, `info`, or `debug`.
+    LogFrontend {
+        level: String,
+        message: String,
+    },
 }

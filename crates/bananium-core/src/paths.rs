@@ -183,6 +183,13 @@ impl Paths {
         self.instance_dir(slug).join("logs")
     }
 
+    /// The launcher's own logs, one file per run (see
+    /// [`crate::logging`]). Distinct from the per-instance game logs in
+    /// [`Paths::instance_logs_dir`].
+    pub fn logs_dir(&self) -> PathBuf {
+        self.home.join("logs")
+    }
+
     /// `profiles.toml`: the saved local (offline) player profiles. See
     /// `bananium_launch::ProfileStore`.
     pub fn profiles_toml(&self) -> PathBuf {
@@ -229,6 +236,7 @@ impl Paths {
             self.assets_objects_dir(),
             self.assets_indexes_dir(),
             self.instances_dir(),
+            self.logs_dir(),
         ] {
             std::fs::create_dir_all(&dir)?;
         }

@@ -267,6 +267,11 @@ impl InstanceStore {
         let (alive, dead): (Vec<Run>, Vec<Run>) =
             runs.into_iter().partition(|run| is_pid_alive(run.pid));
         if !dead.is_empty() && self.paths.instance_dir(slug).is_dir() {
+            tracing::info!(
+                instance = slug,
+                "cleared {} finished game process(es) that exited while untracked",
+                dead.len()
+            );
             let swept: u64 = dead.iter().map(Run::estimated_secs).sum();
             self.write_running(slug, &alive)?;
             if swept > 0 {

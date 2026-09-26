@@ -210,6 +210,7 @@ impl ModrinthClient {
 
             self.limiter.update_from_headers(response.headers());
             let status = response.status();
+            tracing::debug!(url = %url, %status, "modrinth request");
 
             if status.is_success() {
                 let bytes = response.bytes().await.map_err(Error::Http)?;

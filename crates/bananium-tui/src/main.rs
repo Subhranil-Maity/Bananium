@@ -33,7 +33,16 @@ type Term = Terminal<CrosstermBackend<Stdout>>;
 /// cost RAM against the TUI's `< 40 MB` budget for nothing in return.
 #[tokio::main(flavor = "current_thread")]
 async fn main() {
-    bananium_api::init_logging();
+    // File only: stderr is the terminal this UI draws on.
+    if let Ok(paths) = Paths::resolve() {
+        bananium_api::init_logging(
+            &paths,
+            bananium_api::LogOptions {
+                frontend: "tui",
+                stderr: false,
+            },
+        );
+    }
 
     let session = match build_session() {
         Ok(session) => session,
@@ -59,6 +68,7 @@ async fn main() {
     if let Err(err) = result {
         eprintln!("error: {err}");
     }
+    bananium_api::log_shutdown("quit");
 }
 
 /// Resolve `BANANIUM_HOME`, load layered config from it, and build a

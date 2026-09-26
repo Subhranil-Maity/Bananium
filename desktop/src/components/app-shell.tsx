@@ -19,6 +19,7 @@ import { useInstances } from "@/hooks/use-instances";
 import { sortInstances } from "@/lib/instances";
 import { cn } from "@/lib/utils";
 import { useTheme } from "@/stores/theme";
+import { LastSessionNotice } from "@/components/last-session-notice";
 
 /** How many recently played instances get a quick-launch slot in the rail. */
 const QUICK_LAUNCH = 5;
@@ -182,6 +183,7 @@ export function AppShell() {
       <CommandPalette />
       <GlobalContextMenu />
       <NewInstanceDialog />
+      <LastSessionNotice />
       <InstanceDialogsHost />
       <Toaster theme={theme} position="bottom-right" />
     </TooltipProvider>

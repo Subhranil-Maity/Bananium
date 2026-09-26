@@ -116,7 +116,34 @@ impl Session {
     /// Run one `Command` to completion, returning its typed result. This is
     /// the *entire* surface every frontend talks to — see the frontend
     /// contract in CONTRIBUTING.md.
+    ///
+    /// Every command is logged by name (never by content — some carry file
+    /// text) with its duration, and every failure with its error. Commands a
+    /// frontend polls are logged at `trace` only: the console polls the
+    /// launcher log every second, and logging each read would feed itself.
     pub async fn dispatch(&self, command: Command) -> Result<CommandOutput> {
+        let kind: &'static str = (&command).into();
+        let polled = matches!(
+            command,
+            Command::LauncherLogRead { .. }
+                | Command::LauncherLogList
+                | Command::LogRead { .. }
+                | Command::LogList { .. }
+                | Command::PresenceStatus
+                | Command::LogFrontend { .. }
+        );
+        let started = std::time::Instant::now();
+        let result = self.dispatch_inner(command).await;
+        let ms = started.elapsed().as_millis();
+        match &result {
+            Ok(_) if polled => tracing::trace!(command = kind, ms, "command done"),
+            Ok(_) => tracing::debug!(command = kind, ms, "command done"),
+            Err(err) => tracing::warn!(command = kind, ms, "command failed: {err}"),
+        }
+        result
+    }
+
+    async fn dispatch_inner(&self, command: Command) -> Result<CommandOutput> {
         match command {
             Command::ConfigShow => self.config_show(),
             Command::ConfigSet {
@@ -311,6 +338,14 @@ impl Session {
                     status: self.presence.status(),
                 })
             }
+            Command::LauncherLogList => self.launcher_log_list().await,
+            Command::LauncherLogRead {
+                file,
+                offset,
+                before,
+            } => self.launcher_log_read(file, offset, before).await,
+            Command::LauncherLastSession => self.launcher_last_session().await,
+            Command::LogFrontend { level, message } => self.log_frontend(&level, &message),
         }
     }
 
@@ -323,6 +358,7 @@ impl Session {
                 instances_dir: self.paths.instances_dir(),
                 java_dir: self.paths.java_dir(),
                 assets_dir: self.paths.assets_dir(),
+                logs_dir: self.paths.logs_dir(),
             },
             config: self.config(),
         })
@@ -397,6 +433,10 @@ impl Session {
         name: Option<&str>,
         fabric_loader: Option<&str>,
     ) -> Result<CommandOutput> {
+        tracing::info!(
+            "installing Minecraft {version} (fabric: {})",
+            fabric_loader.unwrap_or("none")
+        );
         let meta = MetaClient::new(self.http.clone(), self.paths.clone());
         let (loader, loader_version) = match fabric_loader {
             Some(requested) => {
@@ -464,6 +504,13 @@ impl Session {
             Some(v) => format!("Minecraft {} + Fabric {v}", vanilla.id),
             None => format!("Minecraft {}", vanilla.id),
         };
+        tracing::info!(
+            "resolved {label}: {} libraries, {} natives, {} assets ({} files to check)",
+            resolved.classpath.len(),
+            resolved.natives.len(),
+            asset_index.objects.len(),
+            specs.len()
+        );
         self.download_tracked(task_id, &label, specs).await?;
 
         // Materialize the assets tree into the shape the JVM expects.
@@ -503,6 +550,7 @@ impl Session {
         // The Java runtime Mojang's profile names, so the instance is ready
         // to launch — offline, even — the moment it exists. `None` just means
         // Mojang has no runtime for this platform; launch handles that.
+        tracing::debug!("assets materialized ({asset_total} objects)");
         let (component, _) = java::required_runtime(&profile);
         self.ensure_runtime(task_id, &component).await?;
 
@@ -514,6 +562,7 @@ impl Session {
             cfg.loader_version = loader_version;
             instances.save(&slug, &cfg)?;
         }
+        tracing::info!("installed {label} as instance {slug:?}");
 
         Ok(CommandOutput::Installed {
             instance: slug,
@@ -545,6 +594,13 @@ impl Session {
         if !dry_run && instances.is_running(&slug)? {
             return Err(Error::InstanceAlreadyRunning(slug));
         }
+        tracing::info!(
+            instance = %slug,
+            mc_version = %instance_cfg.mc_version,
+            loader = ?instance_cfg.loader,
+            dry_run,
+            "preparing launch"
+        );
 
         let meta = MetaClient::new(self.http.clone(), self.paths.clone());
         let (_, profile) = self
@@ -599,7 +655,15 @@ impl Session {
             extra_jvm_args: instance_cfg.jvm_args.clone(),
         };
 
+        tracing::info!(
+            instance = %slug,
+            java = %java_path.display(),
+            player = %ctx.player_name,
+            ram_mb = ?ctx.ram_mb,
+            "launch resolved"
+        );
         let plan = build_launch_plan(&profile, &platform, &features, &ctx, java_path);
+        tracing::debug!(instance = %slug, "command line: {}", plan.command_line());
 
         if dry_run {
             return Ok(CommandOutput::LaunchPlanned {
@@ -630,8 +694,17 @@ impl Session {
         cmd.stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::from(stdout_log))
             .stderr(std::process::Stdio::from(stderr_log));
-        let mut child = cmd.spawn()?;
+        let mut child = cmd.spawn().inspect_err(|err| {
+            tracing::error!(instance = %slug, "failed to start the game: {err}");
+        })?;
         let pid = child.id().unwrap_or(0);
+        let started = std::time::SystemTime::now();
+        tracing::info!(
+            instance = %slug,
+            pid,
+            log = %log_path.display(),
+            "game started"
+        );
         instances.mark_running(&slug, pid, Some(&log_path))?;
         self.emit(Event::InstanceLaunched {
             instance: slug.clone(),
@@ -655,10 +728,14 @@ impl Session {
         let events_tx = self.events_tx.clone();
         let exit_paths = self.paths.clone();
         let exit_slug = slug.clone();
+        let game_dir = ctx.game_directory.clone();
+        let game_log = log_path.clone();
         tokio::spawn(async move {
+            let mut killed = false;
             let status = tokio::select! {
                 status = child.wait() => status,
                 Ok(()) = kill_rx => {
+                    killed = true;
                     let _ = child.start_kill();
                     child.wait().await
                 }
@@ -667,7 +744,10 @@ impl Session {
                 .lock()
                 .expect("kill switch mutex poisoned")
                 .remove(&exit_slug);
-            let _ = InstanceStore::new(exit_paths).mark_exited(&exit_slug, pid);
+            log_game_exit(&exit_slug, &status, killed, started, &game_dir, &game_log);
+            if let Err(err) = InstanceStore::new(exit_paths).mark_exited(&exit_slug, pid) {
+                tracing::warn!(instance = %exit_slug, "couldn't record the game's exit: {err}");
+            }
             let _ = events_tx.send(Event::InstanceExited {
                 instance: exit_slug,
                 exit_code: status.ok().and_then(|s| s.code()),
@@ -680,4 +760,72 @@ impl Session {
             log_path,
         })
     }
+}
+
+/// Log how a launched game ended. A non-zero exit (other than one we asked
+/// for with `InstanceKill`) is logged as a crash, naming the files that
+/// explain it: the game's output log, and any crash report or JVM fatal
+/// error log written since it started.
+fn log_game_exit(
+    slug: &str,
+    status: &std::io::Result<std::process::ExitStatus>,
+    killed: bool,
+    started: std::time::SystemTime,
+    game_dir: &std::path::Path,
+    game_log: &std::path::Path,
+) {
+    let secs = started.elapsed().map(|d| d.as_secs()).unwrap_or_default();
+    match status {
+        Err(err) => tracing::error!(instance = %slug, "lost track of the game process: {err}"),
+        Ok(_) if killed => {
+            tracing::info!(instance = %slug, "game stopped by the user after {secs}s")
+        }
+        Ok(s) if s.success() => {
+            tracing::info!(instance = %slug, "game exited normally after {secs}s")
+        }
+        Ok(s) => {
+            let code = s
+                .code()
+                .map_or_else(|| "none (killed by a signal)".into(), |c| c.to_string());
+            tracing::error!(
+                instance = %slug,
+                "game crashed: exit code {code} after {secs}s; game log: {}",
+                game_log.display()
+            );
+            for report in crash_artifacts(game_dir, started) {
+                tracing::error!(instance = %slug, "crash report: {}", report.display());
+            }
+        }
+    }
+}
+
+/// Minecraft crash reports (`crash-reports/*.txt`) and JVM fatal error logs
+/// (`hs_err_pid*.log`) in `game_dir` modified at or after `since`.
+fn crash_artifacts(
+    game_dir: &std::path::Path,
+    since: std::time::SystemTime,
+) -> Vec<std::path::PathBuf> {
+    let recent = |e: &std::fs::DirEntry| {
+        e.metadata()
+            .and_then(|m| m.modified())
+            .is_ok_and(|t| t >= since)
+    };
+    let mut found = Vec::new();
+    if let Ok(entries) = std::fs::read_dir(game_dir.join("crash-reports")) {
+        found.extend(
+            entries
+                .flatten()
+                .filter(|e| e.path().extension().is_some_and(|x| x == "txt") && recent(e))
+                .map(|e| e.path()),
+        );
+    }
+    if let Ok(entries) = std::fs::read_dir(game_dir) {
+        found.extend(
+            entries
+                .flatten()
+                .filter(|e| e.file_name().to_string_lossy().starts_with("hs_err_pid") && recent(e))
+                .map(|e| e.path()),
+        );
+    }
+    found
 }

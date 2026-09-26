@@ -11,6 +11,7 @@ toml = "0.8"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 dirs = "5"
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 ts-rs = { version = "12.0.1", optional = true }
 
 [dev-dependencies]
