@@ -31,7 +31,8 @@ use crate::presence::{
 };
 
 const APP_NAME: &str = "Bananium";
-const REPO_URL: &str = "https://github.com/Subhranil-Maity/Bananium";
+/// Where the "Get Bananium" button sends people: the project website.
+const WEBSITE_URL: &str = "https://subhranil-maity.github.io/Bananium/";
 /// Discord allows about five activity updates per 20 seconds; one per five
 /// keeps well inside that even while an install's progress ticks.
 const MIN_UPDATE_GAP: Duration = Duration::from_secs(5);
@@ -513,7 +514,7 @@ fn compose(model: &Model, config: &DiscordConfig, now: u64) -> Option<Activity> 
         launcher(model, config)
     };
     if config.show_buttons {
-        activity = activity.button("Get Bananium", REPO_URL);
+        activity = activity.button("Get Bananium", WEBSITE_URL);
     } else {
         activity.buttons.clear();
     }
