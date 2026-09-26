@@ -52,7 +52,8 @@ breaking on a much newer Sodium.
 
 ## Try it
 
-Prebuilt releases aren't published yet, so [build it from
-source](https://github.com/Subhranil-Maity/Bananium#installing-and-building).
+Get the Windows installer from the
+[Releases page](https://github.com/Subhranil-Maity/Bananium/releases), or
+[build it from source](https://subhranil-maity.github.io/Bananium/download/#build).
 Bug reports and ideas are welcome on
 [GitHub](https://github.com/Subhranil-Maity/Bananium/issues).

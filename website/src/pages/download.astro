@@ -14,9 +14,10 @@ import { REPO_URL } from '../consts';
     <section class="release" aria-labelledby="release-title">
       <h2 id="release-title">Installers</h2>
       <p class="soft">
-        Prebuilt installers aren't published yet. They'll appear on the GitHub Releases page first;
-        watch the repository to hear when they land. Until then, building from source takes a few
-        minutes.
+        Windows installers are on the GitHub Releases page. Open the latest release and download
+        the <code>setup.exe</code> file. The installer isn't code-signed yet, so Windows may show a
+        SmartScreen warning the first time: choose More info, then Run anyway. On Linux, build from
+        source below.
       </p>
       <div class="actions">
         <a class="btn btn-primary" href={`${REPO_URL}/releases`} rel="noopener">Open Releases</a>
