@@ -1,0 +1,69 @@
+---
+// A square moon and pixel stars. A handful of the stars twinkle.
+import { rng } from '../pixels';
+
+const r = rng(99);
+const stars = Array.from({ length: 70 }, (_, i) => ({
+  x: r(1000) / 10,
+  y: r(900) / 10,
+  s: [2, 2, 2, 3, 4][r(5)],
+  twinkle: i % 7 === 0,
+  delay: r(50) / 10,
+}));
+---
+<div class="night" aria-hidden="true">
+  {stars.map((s) => (
+    <i
+      class:list={['star', { twinkle: s.twinkle }]}
+      style={`left: ${s.x}%; top: ${s.y}%; width: ${s.s}px; height: ${s.s}px; animation-delay: -${s.delay}s;`}
+    ></i>
+  ))}
+  <svg class="moon" viewBox="0 0 8 8" shape-rendering="crispEdges">
+    <rect width="8" height="8" fill="#ecead8" />
+    <rect x="1" y="1" width="2" height="2" fill="#d6d3bd" />
+    <rect x="5" y="2" width="1" height="1" fill="#d6d3bd" />
+    <rect x="4" y="5" width="2" height="2" fill="#d6d3bd" />
+    <rect x="1" y="5" width="1" height="1" fill="#dcd9c4" />
+  </svg>
+</div>
+
+<style>
+  .night {
+    position: absolute;
+    inset: 0;
+    overflow: hidden;
+    pointer-events: none;
+  }
+  .star {
+    position: absolute;
+    background: #e9ecff;
+    opacity: 0.55;
+  }
+  .twinkle {
+    animation: twinkle 3.2s ease-in-out infinite alternate;
+  }
+  @keyframes twinkle {
+    from {
+      opacity: 0.15;
+    }
+    to {
+      opacity: 0.95;
+    }
+  }
+  .moon {
+    position: absolute;
+    top: 96px;
+    right: 9%;
+    width: 72px;
+    height: 72px;
+    box-shadow: 0 0 40px 6px rgba(236, 234, 216, 0.22), 0 0 120px 30px rgba(160, 180, 255, 0.08);
+  }
+  @media (max-width: 720px) {
+    .moon {
+      top: 76px;
+      right: 16px;
+      width: 44px;
+      height: 44px;
+    }
+  }
+</style>

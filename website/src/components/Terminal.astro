@@ -1,0 +1,55 @@
+---
+// A terminal block for CLI examples. Lines starting with "$ " are commands,
+// "# " are comments, anything else is output.
+interface Props {
+  title?: string;
+  lines: string[];
+}
+const { title = 'bash', lines } = Astro.props;
+const parsed = lines.map((l) =>
+  l.startsWith('$ ') ? { kind: 'cmd', text: l.slice(2) } : l.startsWith('# ') ? { kind: 'comment', text: l } : { kind: 'out', text: l },
+);
+---
+<div class="term">
+  <div class="bar"><span>{title}</span></div>
+  <pre><code>{parsed.map((l) => (
+    <span class={`line ${l.kind}`}>{l.kind === 'cmd' && <span class="prompt" aria-hidden="true">$ </span>}{l.text}{'\n'}</span>
+  ))}</code></pre>
+</div>
+
+<style>
+  .term {
+    border-radius: 6px;
+    background: #121110;
+    color: #e6e3dc;
+    overflow: hidden;
+    box-shadow: 10px 10px 0 rgba(0, 0, 0, 0.45);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+  }
+  .bar {
+    height: 32px;
+    display: flex;
+    align-items: center;
+    padding: 0 14px;
+    background: #1f1e1b;
+    font: 500 12px/1 var(--font-mono);
+    color: #8d8a84;
+  }
+  pre {
+    margin: 0;
+    padding: 18px 20px;
+    overflow-x: auto;
+    font-size: 14px;
+    line-height: 1.8;
+  }
+  .prompt {
+    color: #f7d64a;
+    user-select: none;
+  }
+  .comment {
+    color: #7d7a74;
+  }
+  .out {
+    color: #b4b1aa;
+  }
+</style>

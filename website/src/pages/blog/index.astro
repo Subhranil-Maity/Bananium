@@ -1,0 +1,80 @@
+---
+import Base from '../../layouts/Base.astro';
+import FormattedDate from '../../components/FormattedDate.astro';
+import { url } from '../../consts';
+import { getPosts, readingMinutes } from '../../posts';
+
+const posts = await getPosts();
+---
+<Base title="Blog" description="Release notes, design notes, and progress on Bananium." ground="deepslate">
+  <div slot="sky" class="container head">
+    <h1>Blog</h1>
+    <p>Release notes, design decisions, and progress on Bananium. Follow along with the <a href={url('rss.xml')}>RSS feed</a>.</p>
+  </div>
+
+  <div class="container wrap">
+    {posts.length === 0 ? (
+      <p class="soft">No posts yet. The first one is on its way.</p>
+    ) : (
+      <ol class="list">
+        {posts.map((p) => (
+          <li>
+            <p class="meta"><FormattedDate date={p.data.pubDate} />, {readingMinutes(p.body)} min read</p>
+            <h2><a href={url(`blog/${p.id}/`)}>{p.data.title}</a></h2>
+            <p class="soft">{p.data.description}</p>
+          </li>
+        ))}
+      </ol>
+    )}
+  </div>
+</Base>
+
+<style>
+  .head {
+    padding: 48px var(--gutter) 72px;
+  }
+  h1 {
+    font-size: clamp(48px, 7vw, 72px);
+    font-weight: 700;
+    color: var(--sky-fg);
+    text-shadow: 4px 4px 0 var(--title-shadow);
+  }
+  .head p {
+    margin-top: 16px;
+    max-width: 52ch;
+    font-size: 19px;
+    color: var(--sky-fg-soft);
+  }
+  .wrap {
+    max-width: 820px;
+    padding-top: 56px;
+    padding-bottom: 96px;
+  }
+  .list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+  .list li {
+    padding: 28px 0;
+    border-bottom: 2px solid var(--rule);
+  }
+  .list li:first-child {
+    padding-top: 0;
+  }
+  .meta {
+    font-size: 14px;
+    color: var(--fg-soft);
+  }
+  h2 {
+    margin: 8px 0 10px;
+    font-size: 30px;
+  }
+  h2 a {
+    color: var(--fg);
+    text-decoration: none;
+  }
+  h2 a:hover {
+    color: var(--banana);
+  }
+</style>

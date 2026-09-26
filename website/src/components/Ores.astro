@@ -1,0 +1,121 @@
+---
+// Glowing ore blocks set into a layer. They sit only where text never goes:
+// the layer's top and bottom padding bands at any width, plus the side
+// margins outside the content column on wide screens.
+import { ORES, rng, type Ore } from '../pixels';
+
+interface Props {
+  kinds: Ore[];
+  seed: number;
+  /** Ores in the padding bands (always shown). */
+  band?: number;
+  /** Ores per side margin (wide screens only). */
+  side?: number;
+}
+const { kinds, seed, band = 4, side = 3 } = Astro.props;
+const r = rng(seed);
+
+// Two nugget layouts on an 8×8 grid: "x" ore, "h" its lit face.
+const sprites = [
+  ['........', '.xh.....', '.xx...x.', '.....xh.', '..x..xx.', '.xhx....', '..xx..x.', '........'],
+  ['........', '....xh..', '.x..xx..', '.hx.....', '.xx..xh.', '.....xx.', '..xh....', '..x.....'],
+];
+
+type Placed = { kind: Ore; sprite: string[]; style: string; wide: boolean; delay: number; dur: number };
+const pick = () => kinds[r(kinds.length)];
+const placed: Placed[] = [];
+for (let i = 0; i < band; i++) {
+  const top = i % 2 === 0;
+  const y = 4 + r(12);
+  placed.push({
+    kind: pick(),
+    sprite: sprites[r(2)],
+    style: `${top ? 'top' : 'bottom'}: ${y}px; left: ${4 + ((i * 97 + r(20)) % 88)}%;`,
+    wide: false,
+    delay: r(40) / 10,
+    dur: 3 + r(30) / 10,
+  });
+}
+for (const edge of ['left', 'right']) {
+  for (let i = 0; i < side; i++) {
+    const y = 12 + ((i * 80) / Math.max(1, side)) + r(12);
+    placed.push({
+      kind: pick(),
+      sprite: sprites[r(2)],
+      style: `top: ${y}%; ${edge}: calc((100vw - var(--max)) / 4 - 20px + ${r(40) - 20}px);`,
+      wide: true,
+      delay: r(40) / 10,
+      dur: 3 + r(30) / 10,
+    });
+  }
+}
+---
+<div class="ores" aria-hidden="true">
+  {placed.map((o) => {
+    const { color, hi } = ORES[o.kind];
+    return (
+      <span
+        class:list={['ore', { wide: o.wide }]}
+        style={`${o.style} --glow: ${color}; --delay: -${o.delay}s; --dur: ${o.dur}s;`}
+      >
+        <svg viewBox="0 0 8 8" width="40" height="40" shape-rendering="crispEdges">
+          {o.sprite.flatMap((row, y) =>
+            [...row].map((c, x) =>
+              c === '.' ? null : <rect x={x} y={y} width="1" height="1" fill={c === 'h' ? hi : color} />,
+            ),
+          )}
+        </svg>
+      </span>
+    );
+  })}
+</div>
+
+<style>
+  .ores {
+    position: absolute;
+    inset: 0;
+    overflow: hidden;
+    pointer-events: none;
+  }
+  .ore {
+    position: absolute;
+    width: 40px;
+    height: 40px;
+  }
+  .ore svg {
+    position: relative;
+    filter: drop-shadow(0 0 3px var(--glow)) drop-shadow(0 0 8px var(--glow));
+  }
+  /* The light the ore throws on the rock around it. */
+  .ore::before {
+    content: '';
+    position: absolute;
+    inset: -70%;
+    background: radial-gradient(circle, color-mix(in srgb, var(--glow) 70%, transparent) 0%, transparent 62%);
+    opacity: 0.35;
+    animation: pulse var(--dur) ease-in-out var(--delay) infinite alternate;
+  }
+  @keyframes pulse {
+    from {
+      opacity: 0.25;
+    }
+    to {
+      opacity: 0.65;
+    }
+  }
+  .wide {
+    display: none;
+  }
+  @media (max-width: 720px) {
+    .ore,
+    .ore svg {
+      width: 28px;
+      height: 28px;
+    }
+  }
+  @media (min-width: 1320px) {
+    .wide {
+      display: block;
+    }
+  }
+</style>

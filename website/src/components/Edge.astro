@@ -1,0 +1,37 @@
+---
+// The stepped block boundary where one terrain layer meets the next.
+import { edgeTile, GRASS, GRASS_CAP, LAYERS, type Layer } from '../pixels';
+
+interface Props {
+  from: Layer;
+  to: Layer;
+  /** Top the rising columns with grass (the surface). */
+  grass?: boolean;
+  seed?: number;
+}
+const { from, to, grass = false, seed = 5 } = Astro.props;
+const tile = edgeTile({
+  seed,
+  to: LAYERS[to].base,
+  shades: [...LAYERS[to].shades],
+  top: grass ? GRASS : undefined,
+  cap: grass ? GRASS_CAP : undefined,
+});
+const style = [
+  `background-color: ${LAYERS[from].base}`,
+  `background-image: ${tile.image}`,
+  `background-size: ${tile.width}px ${tile.height}px`,
+  `height: ${tile.height}px`,
+].join('; ');
+---
+<div class="edge" style={style} aria-hidden="true"></div>
+
+<style>
+  .edge {
+    background-repeat: repeat-x;
+    background-position: left bottom;
+    image-rendering: pixelated;
+    /* Hide the hairline seam some browsers leave between stacked blocks. */
+    margin-bottom: -1px;
+  }
+</style>

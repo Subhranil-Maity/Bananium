@@ -177,6 +177,15 @@ those over this table if they ever disagree.
 | `bananium-desktop` (`desktop/src-tauri`) | **the GUI** | Tauri 2 bridge for the React app in `desktop/src` |
 | `bananium-rpc` | **dummy stub** | prints `BOILER PLATE`, nothing else |
 
+Outside the workspace, `website/` is the project site: an Astro static site
+(landing page plus a Markdown blog in `website/src/content/blog/`), deployed
+to `https://subhranil-maity.github.io/Bananium` by
+`.github/workflows/deploy-site.yml` on pushes to `main`. No React there, and
+**bun, never npm**. It imports screenshots straight from `docs/images/`, so
+retaking those updates the site too. The terrain textures (sky, grass, dirt,
+stone, deepslate, bedrock) are generated at build time in
+`website/src/pixels.ts`.
+
 ## The frontend contract — do not violate this
 
 `bananium-cli`, `bananium-tui`, `bananium-desktop`, and `bananium-rpc` may

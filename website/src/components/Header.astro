@@ -1,0 +1,126 @@
+---
+import BrandMark from './BrandMark.astro';
+import GitHubIcon from './GitHubIcon.astro';
+import { REPO_URL, url } from '../consts';
+
+const path = Astro.url.pathname.replace(/\/$/, '');
+const links = [
+  { href: url('#features'), label: 'Features' },
+  { href: url('#cli'), label: 'CLI' },
+  { href: url('blog/'), label: 'Blog', match: url('blog') },
+  { href: url('download/'), label: 'Download', match: url('download') },
+];
+---
+<header class="site-header">
+  <div class="container bar">
+    <a class="brand" href={url()}>
+      <span class="tile"><BrandMark size={22} /></span>
+      <span>Bananium</span>
+    </a>
+    <nav aria-label="Main">
+      <ul>
+        {links.map((l) => (
+          <li class:list={[{ keep: l.match }]}>
+            <a href={l.href} aria-current={l.match && path.startsWith(l.match) ? 'page' : undefined}>{l.label}</a>
+          </li>
+        ))}
+      </ul>
+    </nav>
+    <a class="source" href={REPO_URL} rel="noopener">
+      <GitHubIcon /><span>Source</span>
+    </a>
+  </div>
+</header>
+
+<style>
+  .site-header {
+    position: relative;
+    z-index: 2;
+  }
+  .bar {
+    display: flex;
+    align-items: center;
+    gap: 28px;
+    height: 76px;
+  }
+  .brand {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    color: var(--sky-fg);
+    font: 700 24px/1 var(--font-display);
+    text-decoration: none;
+  }
+  .tile {
+    display: grid;
+    place-items: center;
+    width: 38px;
+    height: 38px;
+    border-radius: 4px;
+    background: #2b2925;
+    box-shadow: 3px 3px 0 rgba(0, 0, 0, 0.45);
+    border: 1px solid #3a3732;
+  }
+  nav {
+    margin-left: auto;
+  }
+  ul {
+    display: flex;
+    gap: 6px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+  nav a {
+    display: block;
+    padding: 8px 12px;
+    border-radius: 3px;
+    color: var(--sky-fg);
+    font-size: 16px;
+    font-weight: 500;
+    text-decoration: none;
+  }
+  nav a:hover {
+    background: rgba(255, 255, 255, 0.07);
+  }
+  nav a[aria-current='page'] {
+    background: rgba(255, 255, 255, 0.11);
+  }
+  .source {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    border: 2px solid rgba(239, 238, 233, 0.35);
+    border-radius: 3px;
+    color: var(--sky-fg);
+    font-size: 15px;
+    font-weight: 600;
+    text-decoration: none;
+  }
+  .source:hover {
+    border-color: var(--sky-fg);
+  }
+  @media (max-width: 720px) {
+    .bar {
+      gap: 8px;
+      height: 64px;
+    }
+    .brand {
+      font-size: 20px;
+    }
+    li:not(.keep) {
+      display: none;
+    }
+    nav a {
+      padding: 8px;
+      font-size: 15px;
+    }
+    .source span {
+      display: none;
+    }
+    .source {
+      padding: 7px;
+    }
+  }
+</style>

@@ -1,0 +1,103 @@
+---
+import BrandMark from './BrandMark.astro';
+import GitHubIcon from './GitHubIcon.astro';
+import Edge from './Edge.astro';
+import { layerStyle, type Layer } from '../pixels';
+import { AUTHOR_HANDLE, AUTHOR_NAME, AUTHOR_URL, BLOG_URL, REPO_URL, VERSION, url } from '../consts';
+
+interface Props {
+  from?: Layer;
+}
+const { from = 'deepslate' } = Astro.props;
+---
+<footer class="site-footer on-bedrock">
+  <Edge from={from} to="bedrock" seed={29} />
+  <div class="ground" style={layerStyle('bedrock')}>
+    <div class="container cols">
+      <div>
+        <p class="brand"><BrandMark size={22} /> Bananium <span class="ver">{VERSION}</span></p>
+        <p class="soft">A fast, lightweight Minecraft launcher. Free and open source under the MIT License.</p>
+      </div>
+
+      <div>
+        <h2>Made by {AUTHOR_NAME}</h2>
+        <ul>
+          <li><a href={AUTHOR_URL} rel="author noopener"><GitHubIcon /> @{AUTHOR_HANDLE}</a></li>
+          <li><a href={BLOG_URL} rel="noopener">subhranil-maity.github.io</a></li>
+        </ul>
+      </div>
+
+      <div>
+        <h2>Project</h2>
+        <ul>
+          <li><a href={REPO_URL} rel="noopener">Source code</a></li>
+          <li><a href={`${REPO_URL}/issues`} rel="noopener">Report a bug</a></li>
+          <li><a href={url('download/')}>Download</a></li>
+          <li><a href={url('blog/')}>Blog</a> (<a href={url('rss.xml')}>RSS</a>)</li>
+        </ul>
+      </div>
+    </div>
+    <p class="container fine soft">
+      Not an official Minecraft product. Not approved by or associated with Mojang or Microsoft.
+    </p>
+  </div>
+</footer>
+
+<style>
+  .ground {
+    padding: 48px 0 36px;
+  }
+  .cols {
+    display: grid;
+    grid-template-columns: 1.4fr 1fr 1fr;
+    gap: 40px;
+  }
+  .brand {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 12px;
+    font: 700 22px/1 var(--font-display);
+  }
+  .ver {
+    font: 500 14px/1 var(--font-body);
+    color: var(--fg-soft);
+  }
+  .cols .soft {
+    max-width: 34ch;
+    font-size: 15px;
+  }
+  h2 {
+    font-size: 18px;
+    margin-bottom: 12px;
+  }
+  ul {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    display: grid;
+    gap: 6px;
+    font-size: 15px;
+    color: var(--fg-soft);
+  }
+  ul a {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--fg);
+    text-decoration: none;
+  }
+  ul a:hover {
+    color: var(--banana);
+  }
+  .fine {
+    margin-top: 44px;
+    font-size: 13px;
+  }
+  @media (max-width: 720px) {
+    .cols {
+      grid-template-columns: 1fr;
+      gap: 28px;
+    }
+  }
+</style>

@@ -1,0 +1,599 @@
+---
+import Base from '../layouts/Base.astro';
+import Layer from '../components/Layer.astro';
+import Edge from '../components/Edge.astro';
+import Shot from '../components/Shot.astro';
+import Terminal from '../components/Terminal.astro';
+import GitHubIcon from '../components/GitHubIcon.astro';
+import FormattedDate from '../components/FormattedDate.astro';
+import { REPO_URL, url } from '../consts';
+import { getPosts } from '../posts';
+
+import library from '../../../docs/images/library.png';
+import content from '../../../docs/images/content.png';
+import logs from '../../../docs/images/logs.png';
+import files from '../../../docs/images/files.png';
+import browse from '../../../docs/images/browse.png';
+import presets from '../../../docs/images/presets.png';
+import screenshots from '../../../docs/images/screenshots.png';
+
+const posts = (await getPosts()).slice(0, 3);
+
+const reasons = [
+  ['Light on memory', "A Rust core with a small desktop shell. The launcher shouldn't be what's eating your RAM."],
+  ['Plays without internet', 'Once an instance is installed, it launches from the local cache: on a plane, behind a dead router, anywhere.'],
+  ['Official sources only', "Game files and Java runtimes come straight from Mojang's own servers. No third-party mirrors."],
+  ['One copy of everything', "Libraries, assets, and mod jars are stored once and shared, so ten instances on the same version don't cost ten copies."],
+  ['No Java setup', 'Bananium downloads the exact Java runtime Mojang publishes for each Minecraft version.'],
+  ['Mods that load', "Required dependencies come along automatically, with version picks that don't break each other."],
+];
+
+const features = [
+  {
+    id: 'library',
+    title: 'Library',
+    lede: 'Manage all your instances in one place, and run several at once.',
+    points: [
+      'Grid or list, grouped by group, loader, or game version.',
+      'Sort by last played, name, version, or playtime, and filter as you type.',
+      'A running badge and one-click Play or Stop on every instance.',
+      'Start from scratch, from a preset, or from a Modrinth .mrpack.',
+    ],
+    image: library,
+    alt: 'The Library screen with two instances, one of them running',
+  },
+  {
+    id: 'browse',
+    title: 'Browse Modrinth',
+    lede: 'Mods, resource packs, shaders, and modpacks.',
+    points: [
+      'Filter by category and sort by relevance, downloads, follows, or date.',
+      'Choose an instance under Install to, and you only see what it can run.',
+      'Install in one click, with required dependencies resolved for you.',
+      'Installing a shader pack brings in Iris and Sodium automatically.',
+    ],
+    image: browse,
+    alt: 'The Browse screen showing Modrinth search results',
+  },
+  {
+    id: 'presets',
+    title: 'Presets',
+    lede: "Save an instance's mods once and apply them anywhere.",
+    points: [
+      "Versions are re-picked to match each target's Minecraft version.",
+      'Rename, export, and import presets to share with friends.',
+    ],
+    image: presets,
+    alt: 'The Presets screen listing saved mod presets',
+  },
+  {
+    id: 'screenshots',
+    title: 'Screenshots',
+    lede: "One gallery with every instance's screenshots.",
+    points: ["Filter by instance, flip through with the arrow keys, and delete the ones you don't need."],
+    image: screenshots,
+    alt: 'The Screenshots gallery with captures from every instance',
+  },
+];
+
+const tabs = [
+  ['Content', 'Enable, disable, and remove mods, resource packs, and shaders. Identify unknown jars and apply updates.'],
+  ['Logs', 'A live log with Info, Warn, and Error filters, search, and every past launch.'],
+  ['Files', 'Browse the game folder, rename, delete, import, and edit text files in place.'],
+  ['Settings', 'Max memory, Java override, extra JVM arguments, and group.'],
+];
+
+const shortcuts = [
+  ['Ctrl K', 'Command palette'],
+  ['Ctrl N', 'New instance'],
+  ['Ctrl 1 to 5', 'Library, Browse, Presets, Screenshots, Accounts'],
+  ['Ctrl ,', 'Settings'],
+];
+
+const integrations = [
+  { name: 'Mojang', href: 'https://www.minecraft.net/', what: 'Game files, libraries, assets, and the official Java runtimes.' },
+  { name: 'Modrinth', href: 'https://modrinth.com/', what: 'Mods, resource packs, shaders, and .mrpack modpacks.' },
+  { name: 'Fabric', href: 'https://fabricmc.net/', what: 'Pick a loader version, or the latest stable one, per instance.' },
+  { name: 'Discord', href: 'https://discord.com/', what: "Rich Presence shows what you're playing, with a switch for every detail." },
+];
+---
+<Base last="deepslate">
+  <div slot="sky" class="container hero">
+    <h1>
+      <span class="sr-only">The Banana Launcher</span>
+      <span class="line typed" aria-hidden="true">
+        <!-- The invisible copy holds the line's height so nothing jumps. -->
+        <span class="ghost">The Banana</span>
+        <span class="live"><span class="txt">The Banana</span><span class="caret"></span></span>
+      </span>
+      <span class="line" aria-hidden="true">Launcher</span>
+    </h1>
+    <script is:inline>
+      // The title opens as "Bananium Launcher"; "Bananium" is backspaced and
+      // "The Banana" typed in its place. Inline so it runs before first
+      // paint; without JS, or with reduced motion, the final title shows.
+      (() => {
+        const live = document.currentScript.previousElementSibling.querySelector('.live');
+        const txt = live.querySelector('.txt');
+        if (matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+        const from = 'Bananium';
+        const to = txt.textContent;
+        let text = from;
+        txt.textContent = text;
+        live.classList.add('typing');
+        const step = (fn, ms) => setTimeout(fn, ms);
+        const erase = () => {
+          if (!text) return step(type, 320);
+          text = text.slice(0, -1);
+          txt.textContent = text;
+          step(erase, 65);
+        };
+        const type = () => {
+          if (text === to) return live.classList.remove('typing');
+          text = to.slice(0, text.length + 1);
+          txt.textContent = text;
+          step(type, text.endsWith(' ') ? 140 : 80);
+        };
+        step(erase, 1100);
+      })();
+    </script>
+    <p class="lede">
+      A fast, lightweight Minecraft launcher. Instances, Fabric, Modrinth mods, shaders, resource
+      packs, and modpacks, in a desktop app that stays out of your RAM's way.
+    </p>
+    <div class="cta">
+      <a class="btn btn-primary" href={url('download/')}>Get it now</a>
+      <a class="btn btn-stone" href={REPO_URL} rel="noopener"><GitHubIcon /> View source</a>
+    </div>
+  </div>
+
+  <Layer layer="dirt" label="why-title">
+    <div class="container">
+      <h2 id="why-title" class="h-section">Why Bananium?</h2>
+      <div class="reasons">
+        {reasons.map(([title, body]) => (
+          <div>
+            <h3>{title}</h3>
+            <p class="soft">{body}</p>
+          </div>
+        ))}
+      </div>
+    </div>
+  </Layer>
+
+  <Edge from="dirt" to="stone" seed={8} />
+
+  <Layer layer="stone" id="features" label="features-title" ores={['gold', 'gold', 'redstone', 'lapis']} seed={7}>
+    <div class="container">
+      <h2 id="features-title" class="h-section">What's in the app</h2>
+
+      {features.map((f, i) => (
+        <article class:list={['feature', { flip: i % 2 === 1 }]} id={f.id}>
+          <div class="feature-copy">
+            <h3>{f.title}</h3>
+            <p class="feature-lede">{f.lede}</p>
+            <ul class="blocks">
+              {f.points.map((p) => <li>{p}</li>)}
+            </ul>
+          </div>
+          <Shot src={f.image} alt={f.alt} />
+        </article>
+      ))}
+
+      <article class="instance" id="instance">
+        <h3>Instance page</h3>
+        <p class="feature-lede">Everything about one instance, in tabs.</p>
+        <dl class="tabs">
+          {tabs.map(([name, what]) => (
+            <div><dt>{name}</dt><dd>{what}</dd></div>
+          ))}
+        </dl>
+        <div class="trio">
+          <Shot src={content} alt="The Content tab listing installed mods" sizes="(max-width: 900px) 100vw, 360px" widths={[480, 720]} />
+          <Shot src={logs} alt="The Logs tab showing a game log" sizes="(max-width: 900px) 100vw, 360px" widths={[480, 720]} />
+          <Shot src={files} alt="The Files tab browsing the game folder" sizes="(max-width: 900px) 100vw, 360px" widths={[480, 720]} />
+        </div>
+      </article>
+
+      <div class="extras">
+        <div>
+          <h3>Keyboard shortcuts</h3>
+          <table class="keys">
+            <tbody>
+              {shortcuts.map(([k, v]) => (
+                <tr><td><kbd>{k}</kbd></td><td>{v}</td></tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <div>
+          <h3>Offline accounts</h3>
+          <p>
+            Add a username, pick your default, and switch from the sidebar. They use the standard
+            offline-mode UUID, so they work in singleplayer, on LAN, and on offline-mode servers.
+          </p>
+          <p class="soft small">Bananium is meant for people who own Minecraft. Please buy the game to support Mojang.</p>
+        </div>
+      </div>
+    </div>
+  </Layer>
+
+  <Edge from="stone" to="deepslate" seed={14} />
+
+  <Layer layer="deepslate" label="rules-title" class="deep" ores={['diamond', 'redstone', 'emerald', 'gold']} seed={19}>
+    <div class="container split">
+      <div>
+        <h2 id="rules-title" class="h-section">How mod versions are picked</h2>
+        <p class="soft">
+          Compatibility comes from Modrinth's own metadata. Updates follow the same rules, so
+          updating one mod never breaks another.
+        </p>
+      </div>
+      <ul class="blocks rules">
+        <li><strong>Stable releases only</strong> for automatic picks. You get a beta or alpha only when you choose that exact version.</li>
+        <li><strong>A version must match</strong> your instance's Minecraft version and loader. If the newest one doesn't, an older stable one is used.</li>
+        <li><strong>Pinned dependencies are respected.</strong> Unpinned ones get the newest stable release made no later than the mod itself, so an older Iris never meets a much newer Sodium.</li>
+        <li><strong>Incompatibilities are checked both ways.</strong> A conflicting install falls back to an older version, or is refused with both mods named.</li>
+      </ul>
+    </div>
+
+    <div class="container works">
+      <h2 class="h-section">Works with</h2>
+      <dl class="integrations">
+        {integrations.map((it) => (
+          <div>
+            <dt><a href={it.href} rel="noopener">{it.name}</a></dt>
+            <dd class="soft">{it.what}</dd>
+          </div>
+        ))}
+      </dl>
+    </div>
+
+    <div class="container split" id="cli">
+      <div>
+        <h2 class="h-section">Same core in your terminal</h2>
+        <p class="soft">
+          The <code>bananium</code> command line does almost everything the app does, for scripts,
+          servers, and terminal fans. Add <code>--format-json</code> to any command for
+          machine-readable output.
+        </p>
+        <p class="more"><a href={`${REPO_URL}#command-line-interface`} rel="noopener">Read the CLI reference</a></p>
+      </div>
+      <Terminal
+        lines={[
+          '# a Fabric instance with shaders',
+          '$ bananium install 1.21.1 --name modded --fabric latest',
+          '$ bananium content add modded sodium',
+          '$ bananium content add modded complementary-reimagined --kind shader',
+          '$ bananium launch modded --profile Steve',
+        ]}
+      />
+    </div>
+
+    {posts.length > 0 && (
+      <div class="container latest">
+        <h2 class="h-section">From the blog</h2>
+        <ul>
+          {posts.map((p) => (
+            <li>
+              <a href={url(`blog/${p.id}/`)}>{p.data.title}</a>
+              <FormattedDate date={p.data.pubDate} />
+              <p class="soft">{p.data.description}</p>
+            </li>
+          ))}
+        </ul>
+        <p class="more"><a href={url('blog/')}>All posts</a></p>
+      </div>
+    )}
+  </Layer>
+</Base>
+
+<style>
+  /* Hero: just the words, centred under the night sky. */
+  .hero {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    padding-top: 88px;
+    padding-bottom: 152px;
+  }
+  h1 {
+    font-size: clamp(56px, 9vw, 112px);
+    font-weight: 700;
+    line-height: 0.92;
+    color: var(--sky-fg);
+    /* A one-block drop shadow, like the game's text. */
+    text-shadow: 4px 4px 0 var(--title-shadow);
+  }
+  .line {
+    display: block;
+    white-space: nowrap;
+  }
+  .typed {
+    display: grid;
+    justify-items: center;
+  }
+  .ghost,
+  .live {
+    grid-area: 1 / 1;
+  }
+  .ghost {
+    visibility: hidden;
+  }
+  /* A blocky text cursor in banana yellow. It only exists while the title is
+     being retyped and vanishes once "The Banana" is done. */
+  .caret {
+    display: none;
+    width: 0.12em;
+    height: 0.78em;
+    margin-left: 0.08em;
+    vertical-align: -0.02em;
+    background: var(--banana);
+    box-shadow: 4px 4px 0 var(--title-shadow);
+  }
+  .typing .caret {
+    display: inline-block;
+  }
+  .lede {
+    margin-top: 24px;
+    max-width: 40ch;
+    font-size: 19px;
+    color: var(--sky-fg-soft);
+  }
+  .cta {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 14px;
+    margin-top: 32px;
+  }
+  h3 {
+    font-size: 24px;
+  }
+  .small {
+    font-size: 15px;
+    margin-top: 14px;
+  }
+  .more {
+    margin-top: 20px;
+    font-weight: 600;
+  }
+
+  /* Dirt: the six reasons. */
+  .reasons {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 40px 48px;
+    margin-top: 40px;
+  }
+  .reasons p {
+    margin-top: 10px;
+    font-size: 16px;
+  }
+
+  /* Stone: the app. */
+  .feature {
+    display: grid;
+    grid-template-columns: minmax(0, 4fr) minmax(0, 7fr);
+    gap: 56px;
+    align-items: center;
+    margin-top: 80px;
+  }
+  .feature.flip {
+    grid-template-columns: minmax(0, 7fr) minmax(0, 4fr);
+  }
+  .feature.flip .feature-copy {
+    order: 2;
+  }
+  .feature h3,
+  .instance h3 {
+    font-size: 36px;
+  }
+  .feature-lede {
+    margin: 10px 0 18px;
+    font-size: 19px;
+    color: var(--fg-soft);
+  }
+  .blocks {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    gap: 10px;
+  }
+  .blocks li {
+    position: relative;
+    padding-left: 24px;
+  }
+  /* A tiny gold-ore nugget for a bullet. */
+  .blocks li::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 0.5em;
+    width: 10px;
+    height: 10px;
+    background: var(--banana);
+    box-shadow: inset -3px -3px 0 var(--banana-deep);
+  }
+  .instance {
+    margin-top: 112px;
+  }
+  .tabs {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 28px;
+    margin: 28px 0 36px;
+  }
+  .tabs dt {
+    font: 600 21px/1.2 var(--font-display);
+    margin-bottom: 6px;
+  }
+  .tabs dd {
+    margin: 0;
+    font-size: 16px;
+    color: var(--fg-soft);
+  }
+  .trio {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 24px;
+  }
+  .extras {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 56px;
+    margin-top: 104px;
+  }
+  .extras h3 {
+    margin-bottom: 16px;
+  }
+  .keys {
+    border-collapse: collapse;
+    width: 100%;
+    font-size: 16px;
+  }
+  .keys td {
+    padding: 8px 0;
+    border-bottom: 2px solid var(--rule);
+  }
+  .keys tr:last-child td {
+    border-bottom: 0;
+  }
+  .keys td:first-child {
+    width: 38%;
+    padding-right: 12px;
+  }
+  kbd {
+    display: inline-block;
+    padding: 3px 8px;
+    border-radius: 3px;
+    background: #3f3f42;
+    color: #f7f7f5;
+    box-shadow: inset 0 -3px 0 rgba(0, 0, 0, 0.35), inset 0 2px 0 rgba(255, 255, 255, 0.12);
+    font-size: 14px;
+    white-space: nowrap;
+  }
+
+  /* Deepslate: rules, integrations, CLI, blog. */
+  :global(.deep .body) > .container + .container {
+    margin-top: 112px;
+  }
+  .split {
+    display: grid;
+    grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
+    gap: 56px;
+    align-items: start;
+  }
+  .split .soft {
+    margin-top: 16px;
+    max-width: 44ch;
+  }
+  .rules {
+    gap: 22px;
+    padding-top: 8px;
+  }
+  .rules strong {
+    color: var(--fg);
+  }
+  .rules li {
+    color: var(--fg-soft);
+  }
+  .integrations {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 32px;
+    margin: 32px 0 0;
+  }
+  .integrations div {
+    padding-top: 16px;
+    border-top: 4px solid var(--rule);
+  }
+  .integrations dt {
+    font: 600 24px/1.2 var(--font-display);
+  }
+  .integrations dt a {
+    color: var(--fg);
+    text-decoration: none;
+  }
+  .integrations dt a:hover {
+    color: var(--banana);
+  }
+  .integrations dd {
+    margin: 8px 0 0;
+    font-size: 16px;
+  }
+  #cli {
+    align-items: center;
+  }
+  code {
+    padding: 1px 5px;
+    border-radius: 3px;
+    background: var(--well);
+    color: var(--fg);
+  }
+  .latest ul {
+    list-style: none;
+    margin: 28px 0 0;
+    padding: 0;
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 32px;
+  }
+  .latest li a {
+    font: 600 21px/1.2 var(--font-display);
+    color: var(--fg);
+    text-decoration: none;
+  }
+  .latest li a:hover {
+    color: var(--banana);
+  }
+  .latest :global(time) {
+    display: block;
+    margin-top: 6px;
+    font-size: 14px;
+    color: var(--fg-soft);
+  }
+  .latest li p {
+    margin-top: 8px;
+    font-size: 16px;
+  }
+
+  @media (max-width: 900px) {
+    .feature,
+    .feature.flip,
+    .split {
+      grid-template-columns: minmax(0, 1fr);
+      gap: 32px;
+    }
+    .hero {
+      padding-top: 56px;
+      padding-bottom: 104px;
+    }
+    .feature.flip .feature-copy {
+      order: 0;
+    }
+    .reasons,
+    .tabs,
+    .integrations,
+    .latest ul {
+      grid-template-columns: repeat(2, 1fr);
+    }
+    .trio,
+    .extras {
+      grid-template-columns: 1fr;
+    }
+  }
+  @media (max-width: 560px) {
+    .reasons,
+    .tabs,
+    .integrations,
+    .latest ul {
+      grid-template-columns: 1fr;
+    }
+    .reasons {
+      gap: 28px;
+    }
+  }
+</style>

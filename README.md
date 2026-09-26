@@ -6,6 +6,8 @@
 
 **A fast, lightweight, offline-first Minecraft launcher.**
 
+[Website](https://subhranil-maity.github.io/Bananium/) · [Blog](https://subhranil-maity.github.io/Bananium/blog/)
+
 Instances, Fabric, Modrinth mods, shaders, resource packs, and modpacks in a
 clean desktop app that stays out of your RAM's way.
 

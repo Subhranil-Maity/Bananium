@@ -1,0 +1,249 @@
+@import "@fontsource-variable/pixelify-sans";
+@import "@fontsource-variable/onest";
+@import "@fontsource-variable/jetbrains-mono";
+
+/* The page is a slice of a Minecraft world at night: sky, then grass, dirt,
+   stone, deepslate, and bedrock. The neutrals and banana yellow match the
+   desktop app (desktop/src/index.css); ores are the only other colour, and
+   they glow. Each layer sets its own text colours through `.on-*`. */
+:root {
+  --sky: #0a0f1f;
+  --sky-fg: #efeee9;
+  --sky-fg-soft: #a9adbf;
+  --title-shadow: rgba(0, 0, 0, 0.6);
+  --banana: #f5d547;
+  --banana-deep: #b8911c;
+  --banana-ink: #2a2008;
+
+  --font-display: "Pixelify Sans Variable", "Onest Variable", system-ui, sans-serif;
+  --font-body: "Onest Variable", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono Variable", ui-monospace, "Cascadia Mono", Consolas, monospace;
+
+  --gutter: clamp(16px, 4vw, 32px);
+  --max: 1160px;
+  --measure: 62ch;
+
+  /* Defaults (deepslate), overridden per layer. */
+  --fg: #efeee9;
+  --fg-soft: #a5a29b;
+  --link: #f5d547;
+  --rule: rgba(255, 255, 255, 0.09);
+  --well: rgba(0, 0, 0, 0.3);
+
+  color-scheme: dark;
+}
+
+.on-sky {
+  --fg: var(--sky-fg);
+  --fg-soft: var(--sky-fg-soft);
+  --link: #f5d547;
+  --rule: rgba(255, 255, 255, 0.1);
+  --well: rgba(255, 255, 255, 0.08);
+}
+.on-dirt {
+  --fg: #f1e8dc;
+  --fg-soft: #bfae99;
+  --link: #f5d547;
+  --rule: rgba(255, 236, 210, 0.12);
+  --well: rgba(30, 15, 5, 0.25);
+}
+.on-stone {
+  --fg: #efeee9;
+  --fg-soft: #b3b1ab;
+  --link: #f5d547;
+  --rule: rgba(255, 255, 255, 0.1);
+  --well: rgba(0, 0, 0, 0.3);
+}
+.on-deepslate {
+  --fg: #efeee9;
+  --fg-soft: #a5a29b;
+  --link: #f5d547;
+  --rule: rgba(255, 255, 255, 0.09);
+  --well: rgba(0, 0, 0, 0.3);
+}
+.on-bedrock {
+  --fg: #e4e1da;
+  --fg-soft: #a9a59c;
+  --link: #f7d64a;
+  --rule: rgba(255, 255, 255, 0.1);
+}
+
+[class*="on-"] {
+  color: var(--fg);
+}
+
+/* Base styles, kept deliberately small. */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+  scroll-behavior: smooth;
+  scroll-padding-top: 24px;
+}
+
+body {
+  margin: 0;
+  background: #1c1b19;
+  color: var(--fg);
+  font-family: var(--font-body);
+  font-size: 17px;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+  overflow-x: hidden;
+}
+
+h1,
+h2,
+h3 {
+  margin: 0;
+  font-family: var(--font-display);
+  font-weight: 600;
+  line-height: 1.05;
+  letter-spacing: 0;
+  text-wrap: balance;
+}
+
+p {
+  margin: 0;
+  text-wrap: pretty;
+}
+
+img,
+svg,
+video {
+  display: block;
+  max-width: 100%;
+  height: auto;
+}
+
+a {
+  color: var(--link);
+  text-underline-offset: 3px;
+  text-decoration-thickness: 1px;
+}
+
+a:hover {
+  text-decoration-thickness: 2px;
+}
+
+:focus-visible {
+  outline: 3px solid var(--banana);
+  outline-offset: 3px;
+}
+
+.on-sky :focus-visible {
+  outline-color: var(--banana);
+}
+
+code,
+kbd,
+pre {
+  font-family: var(--font-mono);
+  font-size: 0.88em;
+}
+
+::selection {
+  background: rgba(247, 214, 74, 0.45);
+  color: inherit;
+}
+
+/* Layout helpers. */
+.container {
+  width: 100%;
+  max-width: var(--max);
+  margin-inline: auto;
+  padding-inline: var(--gutter);
+}
+
+/* Type scale (Bringhurst's classic scale: 14 16 18 21 24 36 48 60 72). */
+.h-section {
+  font-size: clamp(36px, 5vw, 48px);
+}
+.h-sub {
+  font-size: 24px;
+}
+.soft {
+  color: var(--fg-soft);
+}
+
+/* Buttons: chunky, square, pressed-down on click like a stone button. */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 48px;
+  padding: 0 22px;
+  border: 0;
+  border-radius: 3px;
+  font: 600 17px/1 var(--font-body);
+  text-decoration: none;
+  cursor: pointer;
+  transition: transform 80ms, box-shadow 80ms;
+}
+
+.btn svg {
+  width: 18px;
+  height: 18px;
+}
+
+.btn:hover {
+  text-decoration: none;
+}
+
+.btn:active {
+  transform: translateY(3px);
+}
+
+.btn-primary {
+  background: var(--banana);
+  color: var(--banana-ink);
+  box-shadow: 0 4px 0 var(--banana-deep), inset 0 -3px 0 rgba(0, 0, 0, 0.08), inset 0 3px 0 rgba(255, 255, 255, 0.45);
+}
+
+.btn-primary:hover {
+  background: #fbe16d;
+}
+
+.btn-primary:active {
+  box-shadow: 0 1px 0 var(--banana-deep), inset 0 3px 0 rgba(255, 255, 255, 0.3);
+}
+
+/* The secondary button is a stone button. */
+.btn-stone {
+  background: #3a3936;
+  color: var(--fg);
+  box-shadow: 0 4px 0 #1a1917, inset 0 3px 0 rgba(255, 255, 255, 0.08), inset 0 -3px 0 rgba(0, 0, 0, 0.2);
+}
+
+.btn-stone:hover {
+  background: #45443f;
+}
+
+.btn-stone:active {
+  box-shadow: 0 1px 0 #1a1917, inset 0 3px 0 rgba(255, 255, 255, 0.05);
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+  *,
+  *::before,
+  *::after {
+    transition: none !important;
+    animation: none !important;
+  }
+}

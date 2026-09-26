@@ -29,6 +29,7 @@ Bananium is a Cargo workspace plus a Tauri desktop app:
 | `crates/bananium-cli`, `crates/bananium-tui` | Terminal frontends |
 | `crates/bananium-rpc` | Placeholder for a future JSON-over-stdio frontend |
 | `desktop/` | The desktop app: Tauri 2 (`src-tauri/`) + React, TypeScript, and shadcn/ui (`src/`) |
+| `website/` | The project website and blog: Astro, static, deployed to GitHub Pages. Posts are Markdown files in `website/src/content/blog/` |
 
 Each crate's `lib.rs` or `main.rs` starts with a `//!` comment describing its
 job.
@@ -110,6 +111,9 @@ cargo doc --workspace --no-deps
 python3 scripts/check_frontend_deps.py
 (cd desktop && bun run typecheck && bun run lint)
 ```
+
+If you touched `website/`, also run
+`(cd website && bun install && bun run check && bun run build)`.
 
 If you changed `Command`, `CommandOutput`, `Event`, or any type they carry,
 regenerate the TypeScript bindings and commit them:

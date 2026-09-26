@@ -1,0 +1,37 @@
+---
+import Ores from './Ores.astro';
+import { layerStyle, type Layer, type Ore } from '../pixels';
+
+interface Props {
+  layer: Layer;
+  id?: string;
+  label?: string;
+  class?: string;
+  /** Ore kinds to set glowing into this layer, if any. */
+  ores?: Ore[];
+  seed?: number;
+}
+const { layer, id, label, class: className, ores, seed = 1 } = Astro.props;
+---
+<section id={id} aria-labelledby={label} class:list={['layer', `on-${layer}`, className]} style={layerStyle(layer)}>
+  {ores && <Ores kinds={ores} seed={seed} />}
+  <div class="body">
+    <slot />
+  </div>
+</section>
+
+<style>
+  .layer {
+    position: relative;
+    padding-block: 72px 88px;
+  }
+  .body {
+    position: relative;
+    z-index: 1;
+  }
+  @media (max-width: 720px) {
+    .layer {
+      padding-block: 56px 64px;
+    }
+  }
+</style>

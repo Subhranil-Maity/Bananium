@@ -1,0 +1,113 @@
+---
+import '../styles/global.css';
+import Header from '../components/Header.astro';
+import Footer from '../components/Footer.astro';
+import NightSky from '../components/NightSky.astro';
+import Ores from '../components/Ores.astro';
+import Edge from '../components/Edge.astro';
+import { layerStyle, type Layer } from '../pixels';
+import { SITE_DESCRIPTION, SITE_TITLE, url } from '../consts';
+
+interface Props {
+  title?: string;
+  description?: string;
+  type?: 'website' | 'article';
+  publishedTime?: Date;
+  /** The layer the page content sits on, just under the grass. */
+  ground?: Layer;
+  /** The last layer before the footer, when the page stacks several. */
+  last?: Layer;
+}
+
+const { title, description = SITE_DESCRIPTION, type = 'website', publishedTime, ground = 'dirt', last = ground } = Astro.props;
+const fullTitle = title ? `${title} | ${SITE_TITLE}` : `${SITE_TITLE}: The Banana Launcher`;
+const canonical = new URL(Astro.url.pathname, Astro.site);
+const ogImage = new URL(url('og.png'), Astro.site);
+---
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{fullTitle}</title>
+    <meta name="description" content={description} />
+    <link rel="canonical" href={canonical} />
+    <link rel="icon" type="image/svg+xml" href={url('favicon.svg')} />
+    <link rel="sitemap" href={url('sitemap-index.xml')} />
+    <link rel="alternate" type="application/rss+xml" title="Bananium blog" href={url('rss.xml')} />
+    <meta name="generator" content={Astro.generator} />
+    <meta name="theme-color" content="#0a0f1f" />
+
+    <meta property="og:type" content={type} />
+    <meta property="og:site_name" content={SITE_TITLE} />
+    <meta property="og:title" content={fullTitle} />
+    <meta property="og:description" content={description} />
+    <meta property="og:url" content={canonical} />
+    <meta property="og:image" content={ogImage} />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    {publishedTime && <meta property="article:published_time" content={publishedTime.toISOString()} />}
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content={fullTitle} />
+    <meta name="twitter:description" content={description} />
+    <meta name="twitter:image" content={ogImage} />
+  </head>
+  <body>
+    <a class="skip sr-only" href="#main">Skip to content</a>
+    <div class="sky on-sky">
+      <NightSky />
+      <Header />
+      <div id="main" class="sky-content">
+        <slot name="sky" />
+      </div>
+    </div>
+    <Edge from="sky" to="dirt" grass seed={3} />
+    {ground !== 'dirt' && (
+      <>
+        <div class="band" style={layerStyle('dirt')}></div>
+        <Edge from="dirt" to={ground} seed={17} />
+      </>
+    )}
+    <main class={`on-${ground}`} style={layerStyle(ground)}>
+      {ground !== 'dirt' && <Ores kinds={['gold', 'diamond', 'redstone', 'emerald']} seed={61} band={3} side={4} />}
+      <div class="main-body"><slot /></div>
+    </main>
+    <Footer from={last} />
+  </body>
+</html>
+
+<style>
+  .sky {
+    position: relative;
+    background: var(--sky);
+    /* Darkest overhead, a little lighter toward the horizon. */
+    background-image: linear-gradient(to bottom, #0a0f1f 0%, #121834 55%, #1a2140 100%);
+  }
+  .sky-content {
+    position: relative;
+    z-index: 1;
+  }
+  .band {
+    height: 16px;
+  }
+  main {
+    position: relative;
+    display: flow-root;
+  }
+  .main-body {
+    position: relative;
+    z-index: 1;
+  }
+  .skip:focus {
+    position: fixed;
+    top: 8px;
+    left: 8px;
+    z-index: 100;
+    width: auto;
+    height: auto;
+    clip: auto;
+    padding: 10px 14px;
+    background: var(--banana);
+    color: var(--banana-ink);
+  }
+</style>

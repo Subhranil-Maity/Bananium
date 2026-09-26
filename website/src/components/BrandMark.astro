@@ -1,0 +1,34 @@
+---
+// Port of desktop/src/components/brand-mark.tsx: a 10×10 pixel banana.
+interface Props {
+  size?: number;
+  class?: string;
+}
+const { size = 24, class: className } = Astro.props;
+const rows = [
+  '.......ss.',
+  '........s.',
+  '.......##.',
+  '......##o.',
+  '.....###o.',
+  '....###o..',
+  '..####oo..',
+  '.####oo...',
+  '..oooo....',
+  '..........',
+];
+const colors: Record<string, string> = { '#': '#f7d64a', o: '#d9a91c', s: '#6b4a1b' };
+const pixels = rows.flatMap((row, y) =>
+  [...row].flatMap((c, x) => (colors[c] ? [{ x, y, fill: colors[c] }] : [])),
+);
+---
+<svg
+  viewBox="0 0 10 10"
+  width={size}
+  height={size}
+  shape-rendering="crispEdges"
+  class={className}
+  aria-hidden="true"
+>
+  {pixels.map((p) => <rect x={p.x} y={p.y} width="1" height="1" fill={p.fill} />)}
+</svg>
