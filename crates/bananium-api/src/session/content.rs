@@ -8,7 +8,7 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::Path;
 
-use bananium_instance::{ContentEntry, ContentKind, ContentStore, Loader};
+use bananium_instance::{ContentEntry, ContentKind, ContentStore, Loader, ModrinthStatus};
 use bananium_modrinth::{
     Facet, FacetsBuilder, HashAlgorithm, SearchQuery, Sort, UpdateVersionFilesRequest, Version,
     VersionsFilter,
@@ -16,12 +16,14 @@ use bananium_modrinth::{
 use bananium_net::DownloadSpec;
 use bananium_store::BlobStore;
 
-use super::Session;
+use super::tasks::TaskSpec;
+use super::{blocking, Session};
 use crate::command::SearchSort;
 use crate::error::{Error, Result};
 use crate::output::{
     CommandOutput, ContentUpdateInfo, GalleryItem, ModrinthHit, ModrinthProject, ModrinthVersion,
 };
+use crate::task::TaskKind;
 
 /// Iris, the shader loader for Fabric. Every shader pack needs it, but
 /// shader packs can't declare that as a Modrinth dependency themselves.
@@ -29,6 +31,11 @@ const IRIS: &str = "iris";
 
 /// Guard against a pathological dependency graph pulling in half of Modrinth.
 const MAX_RESOLVED: usize = 64;
+
+/// Hashes per `version_files` request when identifying. Keeps each request
+/// small enough to answer quickly (and to retry cheaply), and lets the task
+/// report progress between chunks instead of sitting on one step.
+const IDENTIFY_CHUNK: usize = 200;
 
 /// Which version of a project to install. Automatic choices are always
 /// **stable releases**; a beta/alpha is only installed when a user picks
@@ -181,7 +188,20 @@ impl Session {
         if !query.trim().is_empty() {
             search = search.query(query.trim());
         }
+        let started = std::time::Instant::now();
         let res = self.modrinth.search(&search).await?;
+        // Just the query and paging (truncated): enough to follow what the
+        // user was looking for in a pasted log.
+        let shown: String = query.trim().chars().take(100).collect();
+        tracing::info!(
+            query = %shown,
+            ?sort,
+            offset,
+            hits = res.hits.len(),
+            total = res.total_hits,
+            ms = started.elapsed().as_millis() as u64,
+            "modrinth search"
+        );
         let hits = res
             .hits
             .into_iter()
@@ -208,7 +228,13 @@ impl Session {
 
     /// `Command::ModrinthProject`.
     pub(super) async fn modrinth_project(&self, project: &str) -> Result<CommandOutput> {
+        let started = std::time::Instant::now();
         let p = self.modrinth.project(project).await?;
+        tracing::info!(
+            project,
+            ms = started.elapsed().as_millis() as u64,
+            "opened modrinth project"
+        );
         let mut gallery = p.gallery;
         gallery.sort_by_key(|g| (!g.featured, g.ordering));
         Ok(CommandOutput::ModrinthProjectShown {
@@ -385,19 +411,35 @@ impl Session {
             .collect())
     }
 
-    /// `Command::ContentInstall` / `Command::ContentUpdate`, as one task.
+    /// Display name of `instance` for task labels (its slug if it can't
+    /// be read).
+    pub(super) fn instance_name(&self, instance: &str) -> String {
+        self.instances()
+            .load(instance)
+            .map(|cfg| cfg.name)
+            .unwrap_or_else(|_| instance.to_string())
+    }
+
+    /// `Command::ContentInstall`, as one queued task.
     pub(super) async fn content_install_tracked(
         &self,
         instance: &str,
-        roots: Vec<(String, Option<String>, ContentKind)>,
+        project: String,
+        version: Option<String>,
+        kind: ContentKind,
     ) -> Result<CommandOutput> {
-        let task_id = self.new_task_id("content");
-        if let Ok(cfg) = self.instances().load(instance) {
-            self.presence
-                .describe_task(&task_id, format!("Adding content to {}", cfg.name), None);
-        }
+        let name = self.instance_name(instance);
+        let label = format!("Installing {project} into {name}");
+        let spec = TaskSpec::new(TaskKind::ContentInstall, label)
+            .instance(instance)
+            .project(project.clone());
+        let ticket = self.enqueue_task("content", spec, || Ok(()))?;
+        let task_id = ticket.task_id().to_string();
+        self.presence
+            .describe_task(&task_id, format!("Adding content to {name}"), None);
+        let roots = vec![(project, version, kind)];
         let installed = self
-            .tracked(&task_id, self.content_install(&task_id, instance, roots))
+            .tracked(ticket, self.content_install(&task_id, instance, roots))
             .await?;
         Ok(CommandOutput::ContentInstalled {
             instance: instance.to_string(),
@@ -417,6 +459,7 @@ impl Session {
     ) -> Result<Vec<ContentEntry>> {
         let target = self.target(instance)?;
         let store = self.content();
+        self.phase_progress(task_id, "Resolving dependencies", 0, 1, &mut None);
         let installed = store.installed_projects(instance)?;
         let root_ids: HashSet<String> = roots.iter().map(|(p, _, _)| p.clone()).collect();
 
@@ -511,7 +554,20 @@ impl Session {
             picked.push((v, kind, dependency));
         }
 
-        // One project lookup per file, for its title and icon.
+        // Every picked file's project (for its title and icon) in batched
+        // lookups, not one request per file against the rate limit.
+        let ids: Vec<String> = picked
+            .iter()
+            .map(|(v, _, _)| v.project_id.clone())
+            .collect::<HashSet<_>>()
+            .into_iter()
+            .collect();
+        let mut projects = HashMap::new();
+        for chunk in ids.chunks(100) {
+            for p in self.modrinth.projects(chunk).await? {
+                projects.insert(p.id.clone(), p);
+            }
+        }
         let mut specs = Vec::new();
         let mut planned = Vec::new();
         for (version, kind, dependency) in picked {
@@ -526,7 +582,10 @@ impl Session {
                 .sha1
                 .clone()
                 .ok_or_else(|| Error::NoFile(version.id.clone()))?;
-            let project = self.modrinth.project(&version.project_id).await?;
+            let (title, icon_url) = match projects.get(&version.project_id) {
+                Some(p) => (p.title.clone(), p.icon_url.clone()),
+                None => (version.name.clone(), None),
+            };
             specs.push(DownloadSpec {
                 url: file.url.clone(),
                 dest: self.paths.store_blob(&sha1),
@@ -539,13 +598,14 @@ impl Session {
                 kind,
                 filename: file.filename.clone(),
                 enabled: true,
-                title: project.title,
+                title,
                 project_id: Some(version.project_id.clone()),
                 version_id: Some(version.id.clone()),
                 version_number: Some(version.version_number.clone()),
-                icon_url: project.icon_url,
+                icon_url,
                 sha1: Some(sha1),
                 dependency,
+                modrinth: ModrinthStatus::Identified,
             });
         }
 
@@ -606,8 +666,9 @@ impl Session {
         })
     }
 
-    /// `Command::ContentImport`: copy a local file in, then identify it on
-    /// Modrinth if possible (offline, it simply stays an untracked file).
+    /// `Command::ContentImport`: copy a local file in. It starts out
+    /// unchecked; identifying it on Modrinth is the user's call (the
+    /// instance page offers it whenever anything is left unchecked).
     pub(super) async fn content_import(
         &self,
         instance: &str,
@@ -630,9 +691,7 @@ impl Session {
         let dir = self.content().dir(instance, kind);
         std::fs::create_dir_all(&dir)?;
         std::fs::copy(path, dir.join(&filename))?;
-        if let Err(err) = self.identify(instance).await {
-            tracing::debug!(%err, "couldn't identify imported file; keeping it untracked");
-        }
+        tracing::info!(instance, "imported {kind:?} {filename}");
         let entry = self
             .content()
             .sync(instance)?
@@ -645,34 +704,77 @@ impl Session {
         })
     }
 
-    /// `Command::ContentIdentify`.
+    /// `Command::ContentIdentify`, as one queued task. Manual on purpose:
+    /// it used to run at the end of every modpack install, where a slow
+    /// Modrinth made the whole install look stuck.
     pub(super) async fn content_identify(&self, instance: &str) -> Result<CommandOutput> {
-        let identified = self.identify(instance).await?;
+        let name = self.instance_name(instance);
+        let spec = TaskSpec::new(
+            TaskKind::ContentIdentify,
+            format!("Identifying mods in {name}"),
+        )
+        .instance(instance);
+        let ticket = self.enqueue_task("identify", spec, || Ok(()))?;
+        let task_id = ticket.task_id().to_string();
+        let (identified, not_found) = self
+            .tracked(ticket, self.identify(&task_id, instance))
+            .await?;
         Ok(CommandOutput::ContentIdentified {
             instance: instance.to_string(),
             identified,
+            not_found,
         })
     }
 
-    /// Match untracked files to Modrinth versions by SHA-1 and record the
-    /// project/version they belong to. Returns how many were identified.
-    pub(super) async fn identify(&self, instance: &str) -> Result<u32> {
-        let store = self.content();
-        let unknown: Vec<ContentEntry> = store
-            .sync(instance)?
-            .into_iter()
-            .filter(|e| e.project_id.is_none() && e.sha1.is_some())
+    /// Look every [`ModrinthStatus::Unchecked`] file up on Modrinth by
+    /// SHA-1: a match records its project/version/title/icon and becomes
+    /// `Identified`; no match becomes `NotFound` (logged by name, so the
+    /// user can see which files those are) and is never asked about again.
+    /// Returns `(identified, not_found)`. All results land in one lockfile
+    /// write, at the end.
+    pub(super) async fn identify(&self, task_id: &str, instance: &str) -> Result<(u32, u32)> {
+        let started = std::time::Instant::now();
+        const STEP: &str = "Identifying mods";
+        self.phase_progress(task_id, STEP, 0, 1, &mut None);
+        // Syncing hashes every file it hasn't seen yet — a whole modpack's
+        // worth on the first run — so it runs off the async runtime.
+        let entries = {
+            let store = self.content();
+            let slug = instance.to_string();
+            blocking(move || Ok(store.sync(&slug)?)).await?
+        };
+        let unchecked: Vec<&ContentEntry> = entries
+            .iter()
+            .filter(|e| e.modrinth == ModrinthStatus::Unchecked && e.sha1.is_some())
             .collect();
-        if unknown.is_empty() {
-            return Ok(0);
+        let already_known = entries.len() - unchecked.len();
+        if unchecked.is_empty() {
+            tracing::info!(instance, "identify: nothing left to check");
+            self.phase_progress(task_id, STEP, 1, 1, &mut None);
+            return Ok((0, 0));
         }
-        let hashes: Vec<String> = unknown.iter().filter_map(|e| e.sha1.clone()).collect();
-        let found = self
-            .modrinth
-            .version_files(&hashes, HashAlgorithm::Sha1)
-            .await?;
+
+        let hashes: Vec<String> = unchecked.iter().filter_map(|e| e.sha1.clone()).collect();
+        let mut found = HashMap::new();
+        let mut requests = 0;
+        let mut last = None;
+        for (i, chunk) in hashes.chunks(IDENTIFY_CHUNK).enumerate() {
+            self.phase_progress(
+                task_id,
+                &format!("{STEP} ({}/{})", i * IDENTIFY_CHUNK, hashes.len()),
+                i * IDENTIFY_CHUNK,
+                hashes.len(),
+                &mut last,
+            );
+            found.extend(
+                self.modrinth
+                    .version_files(chunk, HashAlgorithm::Sha1)
+                    .await?,
+            );
+            requests += 1;
+        }
         // One batched lookup for every matched project (a modpack can match
-        // dozens), rather than a request each against the rate limit.
+        // hundreds), rather than a request each against the rate limit.
         let ids: Vec<String> = found
             .values()
             .map(|v| v.project_id.clone())
@@ -684,25 +786,65 @@ impl Session {
             for p in self.modrinth.projects(chunk).await? {
                 projects.insert(p.id.clone(), p);
             }
+            requests += 1;
         }
-        let mut count = 0;
-        for entry in unknown {
-            let Some(version) = entry.sha1.as_ref().and_then(|h| found.get(h)) else {
-                continue;
-            };
-            let Some(project) = projects.get(&version.project_id) else {
-                continue;
-            };
-            store.update_metadata(instance, entry.kind, &entry.filename, |e| {
-                e.title = project.title.clone();
-                e.icon_url = project.icon_url.clone();
-                e.project_id = Some(version.project_id.clone());
-                e.version_id = Some(version.id.clone());
-                e.version_number = Some(version.version_number.clone());
-            })?;
-            count += 1;
+        self.phase_progress(task_id, "Saving", hashes.len(), hashes.len(), &mut None);
+
+        let mut identified = 0;
+        let mut not_found = 0;
+        let mut updates = HashMap::new();
+        for entry in &unchecked {
+            let key = (entry.kind, entry.filename.clone());
+            let matched = entry
+                .sha1
+                .as_ref()
+                .and_then(|h| found.get(h))
+                .and_then(|v| Some((v, projects.get(&v.project_id)?)));
+            match matched {
+                Some((version, project)) => {
+                    identified += 1;
+                    updates.insert(key, Some((version.clone(), project.clone())));
+                }
+                None => {
+                    not_found += 1;
+                    tracing::info!(
+                        instance,
+                        "identify: {}/{} (sha1 {}) not found on Modrinth",
+                        entry.kind.dir_name(),
+                        entry.filename,
+                        entry.sha1.as_deref().map_or("-", |h| &h[..h.len().min(12)])
+                    );
+                    updates.insert(key, None);
+                }
+            }
         }
-        Ok(count)
+        let store = self.content();
+        let slug = instance.to_string();
+        blocking(move || {
+            Ok(store.update_all(&slug, |e| {
+                let Some(result) = updates.get(&(e.kind, e.filename.clone())) else {
+                    return;
+                };
+                match result {
+                    Some((version, project)) => {
+                        e.title = project.title.clone();
+                        e.icon_url = project.icon_url.clone();
+                        e.project_id = Some(version.project_id.clone());
+                        e.version_id = Some(version.id.clone());
+                        e.version_number = Some(version.version_number.clone());
+                        e.modrinth = ModrinthStatus::Identified;
+                    }
+                    None => e.modrinth = ModrinthStatus::NotFound,
+                }
+            })?)
+        })
+        .await?;
+        tracing::info!(
+            instance,
+            "identify: {identified} identified, {not_found} not on Modrinth, {already_known} already known, in {}ms ({requests} requests)",
+            started.elapsed().as_millis()
+        );
+        Ok((identified, not_found))
     }
 
     /// Which installed Modrinth content has an update, and to which version.
@@ -841,21 +983,36 @@ impl Session {
         instance: &str,
         projects: &[String],
     ) -> Result<CommandOutput> {
-        let wanted: HashSet<&str> = projects.iter().map(String::as_str).collect();
-        let roots: Vec<(String, Option<String>, ContentKind)> = self
-            .find_updates(instance)
-            .await?
-            .into_iter()
-            .filter(|u| wanted.contains(u.project_id.as_str()))
-            .map(|u| (u.project_id, Some(u.new_version_id), u.kind))
-            .collect();
-        if roots.is_empty() {
-            return Ok(CommandOutput::ContentInstalled {
-                instance: instance.to_string(),
-                installed: Vec::new(),
-            });
-        }
-        self.content_install_tracked(instance, roots).await
+        let name = self.instance_name(instance);
+        let label = match projects.len() {
+            1 => format!("Updating 1 item in {name}"),
+            n => format!("Updating {n} items in {name}"),
+        };
+        let spec = TaskSpec::new(TaskKind::ContentUpdate, label).instance(instance);
+        let ticket = self.enqueue_task("update", spec, || Ok(()))?;
+        let task_id = ticket.task_id().to_string();
+        self.presence
+            .describe_task(&task_id, format!("Updating content in {name}"), None);
+        let installed = self
+            .tracked(ticket, async {
+                let wanted: HashSet<&str> = projects.iter().map(String::as_str).collect();
+                let roots: Vec<(String, Option<String>, ContentKind)> = self
+                    .find_updates(instance)
+                    .await?
+                    .into_iter()
+                    .filter(|u| wanted.contains(u.project_id.as_str()))
+                    .map(|u| (u.project_id, Some(u.new_version_id), u.kind))
+                    .collect();
+                if roots.is_empty() {
+                    return Ok(Vec::new());
+                }
+                self.content_install(&task_id, instance, roots).await
+            })
+            .await?;
+        Ok(CommandOutput::ContentInstalled {
+            instance: instance.to_string(),
+            installed,
+        })
     }
 }
 

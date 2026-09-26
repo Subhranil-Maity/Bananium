@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useSearchParams } from "react-router";
-import { useInfiniteQuery } from "@tanstack/react-query";
+import { keepPreviousData, useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { CalendarClock, Check, Download, Heart, Loader2, Search } from "lucide-react";
 
 import type { ModrinthHit } from "@/bindings/ModrinthHit";
@@ -19,10 +19,12 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { InstanceIcon } from "@/components/instance-icon";
 import { EmptyState, Page, PageHeader } from "@/components/page";
 import { ProjectSheet } from "@/components/project-sheet";
-import { useInstallContent } from "@/hooks/use-content";
+import { RetryingNotice, ServiceError } from "@/components/service-status";
+import { guardedInstall, useInstallContent, useInstallState } from "@/hooks/use-content";
 import { useInstances } from "@/hooks/use-instances";
-import { errorMessage, run } from "@/lib/api";
-import { BROWSE_KINDS, formatCount, type BrowseKind } from "@/lib/content";
+import { logAction, run } from "@/lib/api";
+import { BROWSE_KINDS, contentKey, formatCount, type BrowseKind } from "@/lib/content";
+import { useActiveTask } from "@/stores/tasks";
 import { useNewInstance } from "@/components/new-instance-dialog";
 import { loaderLabel } from "@/lib/instances";
 import { cn, formatRelative } from "@/lib/utils";
@@ -126,14 +128,19 @@ function HitCard({
   hit,
   kind,
   instance,
+  installed,
   onOpen,
 }: {
   hit: ModrinthHit;
   kind: BrowseKind;
   instance: string | null;
+  /** Already in `instance` (from search, or installed since). */
+  installed: boolean;
   onOpen: () => void;
 }) {
   const install = useInstallContent();
+  const state = useInstallState(instance, hit.project_id);
+  const packTask = useActiveTask("modpack_install", null, kind === "modpack" ? hit.project_id : "");
   const openModpack = useNewInstance((s) => s.openModpack);
   return (
     <div
@@ -175,30 +182,36 @@ function HitCard({
         {kind === "modpack" ? (
           <Button
             size="sm"
+            disabled={!!packTask}
             onClick={(e) => {
               e.stopPropagation();
+              if (packTask) return;
+              logAction("modpack_dialog_opened", { project: hit.project_id, from: "card" });
               openModpack({ source: "modrinth", projectId: hit.project_id, title: hit.title, iconUrl: hit.icon_url });
             }}
           >
-            <Download /> Install
+            {packTask ? <Loader2 className="animate-spin" /> : <Download />}
+            {packTask ? (packTask.status === "queued" ? "Queued" : "Installing…") : "Install"}
           </Button>
         ) : (
           instance &&
-          (hit.installed ? (
+          (installed && !state.pending ? (
             <span className="flex h-7 items-center gap-1 rounded-md bg-success/10 px-2.5 text-xs font-medium text-success">
               <Check className="size-3.5" /> Installed
             </span>
           ) : (
             <Button
               size="sm"
-              disabled={install.isPending}
+              disabled={state.pending}
               onClick={(e) => {
                 e.stopPropagation();
-                install.mutate({ instance, kind, project: hit.project_id });
+                guardedInstall(state.pending, { kind, project: hit.project_id, instance, from: "card" }, () =>
+                  install.mutate({ instance, kind, project: hit.project_id }),
+                );
               }}
             >
-              {install.isPending ? <Loader2 className="animate-spin" /> : <Download />}
-              Install
+              {state.pending ? <Loader2 className="animate-spin" /> : <Download />}
+              {state.pending ? (state.queued ? "Queued" : "Installing…") : "Install"}
             </Button>
           ))
         )}
@@ -266,7 +279,18 @@ export function BrowsePage() {
       last.offset + last.hits.length < last.total_hits ? last.offset + last.hits.length : undefined,
     enabled: !vanillaTarget,
     staleTime: 60_000,
+    // Keep showing the previous results (dimmed) while a new search loads,
+    // instead of flashing back to skeletons on every keystroke.
+    placeholderData: keepPreviousData,
   });
+  // What's installed in the target right now, so a card flips to
+  // "Installed" after an install without re-running the search.
+  const content = useQuery({
+    queryKey: contentKey(instance ?? ""),
+    queryFn: async () => (await run({ command: "content_list", instance: instance! }, "content_listed")).entries,
+    enabled: instance !== null && !modpacks,
+  });
+  const installedIds = new Set((content.data ?? []).flatMap((e) => (e.project_id ? [e.project_id] : [])));
 
   // Infinite scroll: fetch the next page when the sentinel scrolls into view.
   const sentinel = useRef<HTMLDivElement>(null);
@@ -409,13 +433,29 @@ export function BrowsePage() {
               them. Resource packs work anywhere.
             </EmptyState>
           )}
-          {results.error && <p className="text-sm text-destructive">{errorMessage(results.error)}</p>}
+          <RetryingNotice loading={results.isFetching} />
+          <ServiceError
+            error={results.error}
+            where="browse"
+            retrying={results.isFetching}
+            onRetry={() => void results.refetch()}
+          />
           {!vanillaTarget && total === 0 && <EmptyState>No results. Try fewer filters or a different search.</EmptyState>}
 
-          <div className="space-y-2">
+          <div className={cn("space-y-2", results.isPlaceholderData && "opacity-60 transition-opacity")}>
             {results.isLoading && [0, 1, 2, 3, 4].map((i) => <Skeleton key={i} className="h-[98px]" />)}
             {hits.map((h) => (
-              <HitCard key={h.project_id} hit={h} kind={kind} instance={instance} onOpen={() => setOpenProject(h.project_id)} />
+              <HitCard
+                key={h.project_id}
+                hit={h}
+                kind={kind}
+                instance={instance}
+                installed={h.installed || installedIds.has(h.project_id)}
+                onOpen={() => {
+                  logAction("project_opened", { project: h.slug ?? h.project_id, from: "browse" });
+                  setOpenProject(h.project_id);
+                }}
+              />
             ))}
             <div ref={sentinel} className="h-8">
               {isFetchingNextPage && <Loader2 className="mx-auto animate-spin text-muted-foreground" />}

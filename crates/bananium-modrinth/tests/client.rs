@@ -5,8 +5,8 @@
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use bananium_modrinth::{
-    Facet, FacetsBuilder, HashAlgorithm, ModrinthClient, SearchQuery, UpdateVersionFilesRequest,
-    VersionsFilter,
+    Facet, FacetsBuilder, HashAlgorithm, ModrinthClient, RetryNotice, RetryReason, SearchQuery,
+    UpdateVersionFilesRequest, VersionsFilter,
 };
 use wiremock::matchers::{body_json, method, path, query_param};
 use wiremock::{Mock, MockServer, Request, Respond, ResponseTemplate};
@@ -463,4 +463,110 @@ async fn preemptively_waits_out_an_exhausted_rate_limit_window() {
         elapsed >= std::time::Duration::from_millis(900),
         "expected the client to preemptively wait ~1s before the second request, only waited {elapsed:?}"
     );
+}
+
+/// A server that never answers in time must end in `Error::Timeout` after
+/// every attempt, with each retry reported to the observer — this is what
+/// turns an endless spinner into "Modrinth didn't respond".
+#[tokio::test]
+async fn a_stalled_server_times_out_and_reports_each_retry() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/project/slow"))
+        .respond_with(ResponseTemplate::new(200).set_delay(std::time::Duration::from_secs(5)))
+        .mount(&server)
+        .await;
+
+    let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let observer_seen = seen.clone();
+    let client = ModrinthClient::with_timeouts(
+        TEST_USER_AGENT,
+        server.uri(),
+        std::time::Duration::from_secs(1),
+        std::time::Duration::from_millis(200),
+    )
+    .expect("client builds")
+    .with_retry_observer(std::sync::Arc::new(move |n: &RetryNotice| {
+        observer_seen
+            .lock()
+            .unwrap()
+            .push((n.endpoint.clone(), n.attempt, n.reason));
+    }));
+
+    let err = client.project("slow").await.expect_err("never answers");
+    assert!(
+        matches!(err, bananium_modrinth::Error::Timeout { .. }),
+        "expected Error::Timeout, got {err:?}"
+    );
+    assert_eq!(
+        *seen.lock().unwrap(),
+        vec![
+            ("project".to_string(), 2, RetryReason::Timeout),
+            ("project".to_string(), 3, RetryReason::Timeout),
+        ]
+    );
+}
+
+/// A 5xx retry is reported with its status, and the request still
+/// succeeds once the server recovers.
+#[tokio::test]
+async fn a_server_error_retry_is_reported_with_its_status() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/version_files"))
+        .respond_with(Sequence::new(vec![
+            ResponseTemplate::new(503),
+            ResponseTemplate::new(200).set_body_json(serde_json::json!({})),
+        ]))
+        .mount(&server)
+        .await;
+
+    let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let observer_seen = seen.clone();
+    let client = client_for(&server)
+        .await
+        .with_retry_observer(std::sync::Arc::new(move |n: &RetryNotice| {
+            observer_seen.lock().unwrap().push(n.reason);
+        }));
+    client
+        .version_files(&["abc".to_string()], HashAlgorithm::Sha1)
+        .await
+        .expect("succeeds on retry");
+    assert_eq!(*seen.lock().unwrap(), vec![RetryReason::ServerError(503)]);
+}
+
+/// When Modrinth's firewall refuses POSTs (a 403, whatever the request),
+/// the bulk hash lookup falls back to one GET per hash — and remembers, so
+/// the next lookup doesn't try the POST first.
+#[tokio::test]
+async fn a_blocked_bulk_lookup_falls_back_to_per_file_gets() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/version_files"))
+        .respond_with(ResponseTemplate::new(403))
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/version_file/known"))
+        .and(query_param("algorithm", "sha1"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(sample_version_json("v1")))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/version_file/unknown"))
+        .respond_with(ResponseTemplate::new(404))
+        .mount(&server)
+        .await;
+
+    let client = client_for(&server).await;
+    let hashes = vec!["known".to_string(), "unknown".to_string()];
+    for _ in 0..2 {
+        let found = client
+            .version_files(&hashes, HashAlgorithm::Sha1)
+            .await
+            .expect("falls back to GETs");
+        assert_eq!(found.len(), 1);
+        assert_eq!(found["known"].id, "v1");
+    }
 }

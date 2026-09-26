@@ -219,6 +219,7 @@ mod tests {
             icon_url: None,
             sha1: None,
             dependency,
+            modrinth: crate::ModrinthStatus::default(),
         }
     }
 

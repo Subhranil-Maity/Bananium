@@ -455,4 +455,12 @@ pub enum Command {
         level: String,
         message: String,
     },
+    /// Every queued and running task, so a frontend can rebuild its task
+    /// tray (e.g. after a reload).
+    TaskList,
+    /// Cancel a task that's still waiting in the queue. Running tasks
+    /// can't be cancelled.
+    TaskCancel {
+        task_id: String,
+    },
 }

@@ -1,5 +1,6 @@
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock, Weak};
 use std::time::Duration;
 
 use futures_util::StreamExt;
@@ -183,6 +184,29 @@ async fn download_one(
         return Ok(());
     }
 
+    // Two tasks can want the same file at once (two installs sharing a
+    // library, or one pack's files already fetched by another). They would
+    // both stream into the same `.part` file and corrupt it, so only one
+    // fetches at a time; whoever waited then finds the file already there.
+    let lock = dest_lock(&spec.dest);
+    let _writing = lock.lock().await;
+    if file_verifies(
+        &spec.dest,
+        spec.expected_size,
+        spec.expected_sha1.as_deref(),
+    )
+    .await
+    {
+        on_progress(Progress {
+            task_id: spec.task_id.clone(),
+            label: spec.label.clone(),
+            bytes_done: spec.expected_size.unwrap_or(0),
+            bytes_total: spec.expected_size,
+            bytes_per_sec: 0.0,
+        });
+        return Ok(());
+    }
+
     if let Some(parent) = spec.dest.parent() {
         tokio::fs::create_dir_all(parent).await?;
     }
@@ -222,6 +246,27 @@ async fn download_one(
     Err(last_err.unwrap_or(Error::RetriesExhausted {
         url: spec.url.clone(),
     }))
+}
+
+/// Destinations some download in this process is writing right now, each
+/// with the lock its writer holds. Entries are weak so a finished download
+/// frees its lock; dead entries are swept once the map grows.
+static IN_FLIGHT: LazyLock<std::sync::Mutex<HashMap<PathBuf, Weak<tokio::sync::Mutex<()>>>>> =
+    LazyLock::new(Default::default);
+
+/// The process-wide lock for writing `dest`, shared by every download of
+/// that same path (see its use in [`download_one`]).
+fn dest_lock(dest: &Path) -> Arc<tokio::sync::Mutex<()>> {
+    let mut map = IN_FLIGHT.lock().expect("download lock map poisoned");
+    if let Some(lock) = map.get(dest).and_then(Weak::upgrade) {
+        return lock;
+    }
+    if map.len() >= 1024 {
+        map.retain(|_, lock| lock.strong_count() > 0);
+    }
+    let lock = Arc::new(tokio::sync::Mutex::new(()));
+    map.insert(dest.to_path_buf(), Arc::downgrade(&lock));
+    lock
 }
 
 /// Verify the completed `.part` file's checksum (if `expected_sha1` was

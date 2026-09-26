@@ -85,7 +85,14 @@ milestone order — see the table below for exactly what each covers:
   search/versions/inspect/install (`bananium modpack install <file|slug>`).
   An install is a normal `install` of the pack's pinned Minecraft + Fabric,
   then the pack's files through the content store (SHA-1 verified), then
-  `overrides/` + `client-overrides/`, the project icon, and `identify`.
+  `overrides/` + `client-overrides/` and the project icon. It does **not**
+  identify the pack's mods on Modrinth any more: that step made installs
+  hang at 67% whenever Modrinth was slow. Identifying is manual
+  (`ContentIdentify`, the instance page's Identify button, `bananium content
+  identify`); each lockfile entry records `modrinth: unchecked | identified
+  | not_found` (`ModrinthStatus`), the page glows and warns while anything
+  is `unchecked`, and a file Modrinth doesn't know is logged by name once
+  and marked `not_found` so it's never asked about again.
   Forge/NeoForge/Quilt packs are refused. Verified for real with
   Fabulously Optimized (49 mods, dry-run launch OK).
 - **Discord Rich Presence** (`bananium-api/src/session/presence.rs`, on
@@ -373,6 +380,56 @@ for real and are worth knowing up front.
     install is refused naming the pair.
   - Updates obey the same caps from installed dependents (`find_updates`),
     and `ContentUpdate` installs exactly what the check offered.
+
+- **Every long-running command is a queued task** (`session/tasks.rs`):
+  install, modpack install, content install/update, preset apply,
+  identify, and a launch's Java download. The task is queued — and
+  announced with `Event::TaskQueued` — *before* any network work, so the
+  UI shows it the moment it's clicked (before this, nothing appeared until
+  the first download, so users clicked again and got 3-6 duplicate
+  installs). Rules: tasks on one instance run one at a time in order,
+  different instances run in parallel up to `MAX_PARALLEL_TASKS` (2), and
+  an identical request (same kind/instance/project, or a second new
+  instance under a pending name) is refused with `Error::AlreadyQueued`.
+  The name-taken check for a new modpack instance runs under the queue
+  lock (`enqueue`'s `precheck`), so it can't race. Direct changes to a
+  busy instance (toggle/remove content, file edits, launch, remove/rename)
+  are refused with `Error::InstanceBusy` rather than queued. Queued tasks
+  can be cancelled (`TaskCancel`); `TaskList` rebuilds a frontend's tray.
+  The `Ticket` frees its slot on drop, so no error path can leave a stuck
+  entry. Frontends key their Install buttons off the task (kind +
+  instance + project), not their own mutation state.
+
+- **Modrinth requests have timeouts and report their retries**
+  (`bananium-modrinth/src/client.rs`): 10s connect, 30s total, 3 attempts.
+  Without them a dead connection waited on the OS (~21s per attempt on
+  Windows) and a stalled one hung its command forever — the endless
+  skeletons and spinners. Timeouts and failed connects surface as
+  `Error::Timeout` / `Error::Unreachable` ("Modrinth didn't respond"). A
+  `RetryObserver` sees every retry and noticeable rate-limit wait;
+  `Session` turns it into `Event::TaskRetrying` when the request runs
+  inside a task (the task id comes from the `CURRENT_TASK` task-local set
+  by `tracked`) or `Event::ServiceRetrying` otherwise (search, project
+  pages). Modrinth's firewall has been seen refusing **every POST** from a
+  network (a 403 "Request blocked" HTML page) while GETs work, so the two
+  bulk POST lookups (`version_files`, `version_files/update`) fall back to
+  per-file `GET /version_file/{hash}` (plus a project-versions GET for
+  updates), 8 at a time, and stop trying the POST for the session. Mod
+  installs, identify and update checks all depend on those lookups. The
+  shared `HttpClient` now has a 30s *read* timeout (not a total
+  one) so a stalled download stream errors into the downloader's resume
+  path, and `bananium-net` allows one writer per destination file
+  process-wide, so two installs sharing a library can't corrupt one `.part`.
+
+- **Logging is a timeline**: task lifecycle lines under target
+  `bananium_api::task` (queued/started/phase/retrying/finished/failed/
+  rejected/cancelled — phases only when they change), search and project
+  opens with timing, per-request Modrinth timings at `debug`, and user
+  actions from the webview via `logAction` (`action=install_clicked …`) on
+  a throttle budget separate from `logToBackend`'s errors. Heavy file work
+  inside tasks (hashing in `sync`, asset/pack-file materializing, override
+  extraction) runs through `session::blocking` so it can't stall the
+  runtime.
 
 - **Progress events are throttled at the source** (~10/s per task,
   `session/download.rs`), with an exact final update always sent. Unthrottled

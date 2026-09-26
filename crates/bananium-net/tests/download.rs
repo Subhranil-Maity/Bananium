@@ -260,3 +260,61 @@ async fn complete_but_unrenamed_partial_file_is_committed_without_network() {
     assert_eq!(std::fs::read(&dest).unwrap(), body);
     assert!(!dest.with_file_name("blob.part").exists());
 }
+
+/// Two downloaders fetching the same destination at once (two installs
+/// sharing a library) must not both stream into one `.part` file: the
+/// second waits for the first and then finds the file already in place, so
+/// the server sees exactly one request and both calls succeed.
+#[tokio::test]
+async fn concurrent_downloads_of_one_destination_fetch_it_once() {
+    use std::io::{BufRead, BufReader};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    let body: &'static [u8] = b"shared library bytes, fetched exactly once";
+    let hits = Arc::new(AtomicUsize::new(0));
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
+    let server_hits = hits.clone();
+    std::thread::spawn(move || {
+        for stream in listener.incoming() {
+            let Ok(mut stream) = stream else { continue };
+            let mut reader = BufReader::new(stream.try_clone().unwrap());
+            loop {
+                let mut line = String::new();
+                if reader.read_line(&mut line).unwrap_or(0) == 0 || line.trim().is_empty() {
+                    break;
+                }
+            }
+            server_hits.fetch_add(1, Ordering::SeqCst);
+            // Slow enough that the second download starts while the first
+            // is still in flight.
+            std::thread::sleep(std::time::Duration::from_millis(300));
+            let header = format!(
+                "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                body.len()
+            );
+            stream.write_all(header.as_bytes()).unwrap();
+            stream.write_all(body).unwrap();
+        }
+    });
+
+    let dir = tempfile::tempdir().unwrap();
+    let spec = DownloadSpec {
+        url: format!("http://{addr}/file"),
+        dest: dir.path().join("blob"),
+        expected_sha1: Some(sha1_hex(body)),
+        expected_size: Some(body.len() as u64),
+        task_id: "t".into(),
+        label: "file".into(),
+    };
+    let a = Downloader::new(reqwest::Client::new(), 2);
+    let b = Downloader::new(reqwest::Client::new(), 2);
+    let (ra, rb) = tokio::join!(
+        a.download(&spec, no_progress()),
+        b.download(&spec, no_progress())
+    );
+    ra.unwrap();
+    rb.unwrap();
+    assert_eq!(std::fs::read(&spec.dest).unwrap(), body);
+    assert_eq!(hits.load(Ordering::SeqCst), 1);
+}

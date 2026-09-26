@@ -97,6 +97,46 @@ pub struct ContentEntry {
     /// rather than chosen directly.
     #[serde(default)]
     pub dependency: bool,
+    /// Whether this file has been looked up on Modrinth, and what came of
+    /// it. Identifying is a manual step (it was the slow tail of every
+    /// modpack install), so this is what tells a frontend there's still
+    /// something left to identify.
+    #[serde(default)]
+    pub modrinth: ModrinthStatus,
+}
+
+/// Where a piece of content stands with Modrinth. Lives in the lockfile
+/// next to the rest of the entry's metadata, so a file that appears in a
+/// content folder starts out [`ModrinthStatus::Unchecked`] automatically.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
+#[serde(rename_all = "snake_case")]
+pub enum ModrinthStatus {
+    /// Never looked up: identifying the instance's content would check it.
+    #[default]
+    Unchecked,
+    /// Matched to a Modrinth project (`project_id` is set).
+    Identified,
+    /// Looked up, and Modrinth doesn't know this file (a local build, a
+    /// mod from elsewhere, an unzipped pack). Never checked again, so it
+    /// doesn't count as "left to identify".
+    NotFound,
+}
+
+impl ContentEntry {
+    /// The status an entry *should* have given what's known about it:
+    /// anything with a project id is identified (lockfiles written before
+    /// the status existed load as `Unchecked` otherwise), and a directory
+    /// pack has no hash to look up, so there's nothing to check.
+    fn normalized_status(&self) -> ModrinthStatus {
+        if self.project_id.is_some() {
+            ModrinthStatus::Identified
+        } else if self.sha1.is_none() {
+            ModrinthStatus::NotFound
+        } else {
+            self.modrinth
+        }
+    }
 }
 
 /// On-disk shape of `bananium.lock.toml`.
@@ -202,7 +242,12 @@ impl ContentStore {
                         version_number: None,
                         icon_url: None,
                         dependency: false,
+                        modrinth: ModrinthStatus::Unchecked,
                     },
+                };
+                let entry = ContentEntry {
+                    modrinth: entry.normalized_status(),
+                    ..entry
                 };
                 entries.push(entry);
             }
@@ -256,6 +301,18 @@ impl ContentStore {
             .find(|e| e.kind == kind && e.filename == filename)
             .ok_or_else(|| Error::ContentNotFound(filename.to_string()))?;
         apply(entry);
+        self.save(slug, &LockFile { entries })
+    }
+
+    /// Apply `apply` to every entry in one pass — one sync and one save,
+    /// however many entries change. Updating entries one call at a time
+    /// re-scans the content folders and rewrites the lockfile for each,
+    /// which on a 300-mod pack is 300 full rescans.
+    pub fn update_all(&self, slug: &str, mut apply: impl FnMut(&mut ContentEntry)) -> Result<()> {
+        let mut entries = self.sync(slug)?;
+        for entry in &mut entries {
+            apply(entry);
+        }
         self.save(slug, &LockFile { entries })
     }
 
@@ -438,6 +495,7 @@ mod tests {
             icon_url: None,
             sha1: None,
             dependency: false,
+            modrinth: ModrinthStatus::Identified,
         };
         put(&store, ContentKind::Mod, "sodium-1.jar", "1");
         store.upsert("main", entry("sodium-1.jar", "v1")).unwrap();
@@ -451,5 +509,53 @@ mod tests {
             .dir("main", ContentKind::Mod)
             .join("sodium-1.jar")
             .exists());
+    }
+
+    #[test]
+    fn status_starts_unchecked_and_follows_what_is_known() {
+        let (_d, paths, store) = setup();
+        put(&store, ContentKind::Mod, "local.jar", "a");
+        put(&store, ContentKind::Mod, "sodium.jar", "b");
+        std::fs::create_dir_all(
+            store
+                .dir("main", ContentKind::ResourcePack)
+                .join("Unzipped"),
+        )
+        .unwrap();
+        // A lockfile written before the status existed: project id, no status.
+        std::fs::write(
+            paths.instance_lock("main"),
+            "[[content]]
+kind = \"mod\"
+filename = \"sodium.jar\"
+enabled = true
+title = \"Sodium\"
+project_id = \"AANobbMI\"
+sha1 = \"x\"
+",
+        )
+        .unwrap();
+
+        let status = |store: &ContentStore, name: &str| {
+            store
+                .sync("main")
+                .unwrap()
+                .into_iter()
+                .find(|e| e.filename == name)
+                .unwrap()
+                .modrinth
+        };
+        assert_eq!(status(&store, "local.jar"), ModrinthStatus::Unchecked);
+        assert_eq!(status(&store, "sodium.jar"), ModrinthStatus::Identified);
+        assert_eq!(status(&store, "Unzipped"), ModrinthStatus::NotFound);
+
+        store
+            .update_all("main", |e| {
+                if e.filename == "local.jar" {
+                    e.modrinth = ModrinthStatus::NotFound;
+                }
+            })
+            .unwrap();
+        assert_eq!(status(&store, "local.jar"), ModrinthStatus::NotFound);
     }
 }

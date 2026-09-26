@@ -19,6 +19,7 @@ import type { ProfileSummary } from "./ProfileSummary";
 import type { ResolvedPaths } from "./ResolvedPaths";
 import type { Screenshot } from "./Screenshot";
 import type { SkippedEntry } from "./SkippedEntry";
+import type { TaskInfo } from "./TaskInfo";
 import type { VersionSummary } from "./VersionSummary";
 
 /**
@@ -65,7 +66,16 @@ size: number, } | { "result": "launcher_last_session", log: LauncherLogFile | nu
 /**
  * Which log was read; `None` when the instance has no logs yet.
  */
-file: string | null, text: string, next_offset: number, } | { "result": "modrinth_searched", hits: Array<ModrinthHit>, offset: number, total_hits: number, } | { "result": "modrinth_project_shown", project: ModrinthProject, } | { "result": "modrinth_versions_listed", versions: Array<ModrinthVersion>, } | { "result": "modpack_inspected", pack: ModpackSummary, } | { "result": "content_listed", instance: string, entries: Array<ContentEntry>, } | { "result": "content_installed", instance: string, installed: Array<ContentEntry>, } | { "result": "content_removed", instance: string, filename: string, } | { "result": "content_toggled", instance: string, filename: string, enabled: boolean, } | { "result": "content_imported", instance: string, entry: ContentEntry, } | { "result": "content_identified", instance: string, identified: number, } | { "result": "content_updates_found", instance: string, updates: Array<ContentUpdateInfo>, } | { "result": "java_listed", installs: Array<JavaInstall>, } | { "result": "java_runtime_removed", component: string, } | { "result": "instance_java_shown", instance: string, component: string, major_version: number | null, 
+file: string | null, text: string, next_offset: number, } | { "result": "modrinth_searched", hits: Array<ModrinthHit>, offset: number, total_hits: number, } | { "result": "modrinth_project_shown", project: ModrinthProject, } | { "result": "modrinth_versions_listed", versions: Array<ModrinthVersion>, } | { "result": "modpack_inspected", pack: ModpackSummary, } | { "result": "content_listed", instance: string, entries: Array<ContentEntry>, } | { "result": "content_installed", instance: string, installed: Array<ContentEntry>, } | { "result": "content_removed", instance: string, filename: string, } | { "result": "content_toggled", instance: string, filename: string, enabled: boolean, } | { "result": "content_imported", instance: string, entry: ContentEntry, } | { "result": "content_identified", instance: string, 
+/**
+ * Files matched to a Modrinth project this time.
+ */
+identified: number, 
+/**
+ * Files looked up that Modrinth doesn't know (each is logged by
+ * name); they're marked and not checked again.
+ */
+not_found: number, } | { "result": "content_updates_found", instance: string, updates: Array<ContentUpdateInfo>, } | { "result": "java_listed", installs: Array<JavaInstall>, } | { "result": "java_runtime_removed", component: string, } | { "result": "instance_java_shown", instance: string, component: string, major_version: number | null, 
 /**
  * Installed runtime version; `None` if not downloaded yet (it
  * downloads before the first launch).
@@ -86,4 +96,4 @@ skipped_local: number, } | { "result": "preset_applied", instance: string,
 /**
  * Everything installed, dependencies included.
  */
-applied: Array<ContentEntry>, skipped: Array<SkippedEntry>, } | { "result": "preset_deleted", name: string, } | { "result": "preset_renamed", name: string, } | { "result": "preset_exported", path: string, } | { "result": "preset_imported", preset: Preset, } | { "result": "profile_listed", profiles: Array<ProfileSummary>, } | { "result": "profile_added", profile: ProfileSummary, } | { "result": "profile_removed", name: string, } | { "result": "profile_default_set", name: string, } | { "result": "presence_status_shown", status: PresenceStatus, } | { "result": "presence_previewed", preview: PresencePreview | null, } | { "result": "presence_view_set" };
+applied: Array<ContentEntry>, skipped: Array<SkippedEntry>, } | { "result": "preset_deleted", name: string, } | { "result": "preset_renamed", name: string, } | { "result": "preset_exported", path: string, } | { "result": "preset_imported", preset: Preset, } | { "result": "profile_listed", profiles: Array<ProfileSummary>, } | { "result": "profile_added", profile: ProfileSummary, } | { "result": "profile_removed", name: string, } | { "result": "profile_default_set", name: string, } | { "result": "presence_status_shown", status: PresenceStatus, } | { "result": "presence_previewed", preview: PresencePreview | null, } | { "result": "presence_view_set" } | { "result": "task_listed", tasks: Array<TaskInfo>, } | { "result": "task_cancelled", task_id: string, };

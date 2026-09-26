@@ -27,6 +27,21 @@ pub enum Error {
         source: serde_json::Error,
     },
 
+    /// Modrinth didn't answer within the request timeout, on the last
+    /// attempt. Split out from [`Error::Http`] so a frontend can say
+    /// "Modrinth didn't respond" instead of showing a raw transport error.
+    #[error("Modrinth didn't respond in time ({url})")]
+    Timeout { url: String },
+
+    /// No connection to Modrinth could be made at all (DNS, refused, no
+    /// route) on the last attempt — usually means the machine is offline.
+    #[error("couldn't reach Modrinth ({url}): {source}")]
+    Unreachable {
+        url: String,
+        #[source]
+        source: reqwest::Error,
+    },
+
     /// Every retry attempt for a request failed with a transport error
     /// (never a clean non-2xx response, which surfaces as [`Error::Status`]
     /// instead).

@@ -7,6 +7,7 @@ pub mod event;
 pub mod output;
 pub mod presence;
 pub mod session;
+pub mod task;
 
 pub use command::{Command, ModpackSource, SearchSort};
 pub use error::{Error, Result};
@@ -21,6 +22,7 @@ pub use presence::{
     RETRY_INTERVAL_SECS,
 };
 pub use session::Session;
+pub use task::{TaskInfo, TaskKind, TaskState};
 
 // Re-exported so frontends can construct a `Session` without depending on
 // bananium-core directly (frontend crates depend only on bananium-api).
@@ -35,7 +37,7 @@ pub use bananium_instance::is_valid_name as is_valid_instance_name;
 
 /// Content types that appear in `Command`/`CommandOutput`, re-exported so
 /// frontends can name them while depending on only `bananium-api`.
-pub use bananium_instance::{ContentEntry, ContentKind, Preset, PresetEntry};
+pub use bananium_instance::{ContentEntry, ContentKind, ModrinthStatus, Preset, PresetEntry};
 
 pub use bananium_core::logging::LogOptions;
 

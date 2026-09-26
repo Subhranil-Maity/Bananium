@@ -5,6 +5,7 @@ use bananium_instance::{ContentEntry, ContentKind, Preset};
 use serde::Serialize;
 
 use crate::presence::{PresencePreview, PresenceStatus};
+use crate::task::TaskInfo;
 
 /// The subset of `Paths` surfaced to frontends, for `bananium config show`.
 #[derive(Debug, Clone, Serialize)]
@@ -453,7 +454,11 @@ pub enum CommandOutput {
     },
     ContentIdentified {
         instance: String,
+        /// Files matched to a Modrinth project this time.
         identified: u32,
+        /// Files looked up that Modrinth doesn't know (each is logged by
+        /// name); they're marked and not checked again.
+        not_found: u32,
     },
     ContentUpdatesFound {
         instance: String,
@@ -534,6 +539,12 @@ pub enum CommandOutput {
         preview: Option<PresencePreview>,
     },
     PresenceViewSet,
+    TaskListed {
+        tasks: Vec<TaskInfo>,
+    },
+    TaskCancelled {
+        task_id: String,
+    },
 }
 
 /// One saved offline profile (a username to play as).

@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::presence::PresenceStatus;
+use crate::task::TaskKind;
 
 /// Everything a frontend can be told about while a `Command` runs. Every
 /// long-running task reports `Progress` under a stable `task_id`, so every
@@ -65,6 +66,46 @@ pub enum Event {
         files_done: usize,
         #[cfg_attr(feature = "ts", ts(type = "number"))]
         files_total: usize,
+    },
+    /// A long-running task was accepted and is waiting for its turn (see
+    /// the task queue's rules in `session::tasks`), sent the moment it's
+    /// requested — before any network work. Sent again with a new
+    /// `position` whenever the line ahead of it moves.
+    TaskQueued {
+        task_id: String,
+        kind: TaskKind,
+        label: String,
+        instance: Option<String>,
+        project: Option<String>,
+        /// 1-based place in the waiting line.
+        position: u32,
+    },
+    /// A queued task got its turn and is now running.
+    TaskStarted {
+        task_id: String,
+    },
+    /// A running task's request to a service (Modrinth) failed or was held
+    /// back, and is being retried; `attempt` is the attempt about to be
+    /// made. Cleared by the task's next progress event.
+    TaskRetrying {
+        task_id: String,
+        attempt: u32,
+        max_attempts: u32,
+        /// Why, for people: "Modrinth didn't respond".
+        reason: String,
+    },
+    /// Like `TaskRetrying`, for a request that isn't part of a task (a
+    /// search, a project page), so a frontend can say "Modrinth is slow to
+    /// respond — retrying" instead of showing an endless skeleton.
+    ServiceRetrying {
+        service: String,
+        attempt: u32,
+        max_attempts: u32,
+        reason: String,
+    },
+    /// A queued task was cancelled before it started.
+    TaskCancelled {
+        task_id: String,
     },
     TaskCompleted {
         task_id: String,

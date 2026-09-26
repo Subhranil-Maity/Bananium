@@ -57,6 +57,37 @@ export function logToBackend(level: "error" | "warn" | "info" | "debug", message
   dispatch({ command: "log_frontend", level, message }).catch(() => {});
 }
 
+const ACTION_LIMIT = 120;
+let actionWindow = { start: 0, count: 0 };
+
+/**
+ * Record a user action in the launcher log (`action=<name> k=v …` under the
+ * `webview` target), so a pasted log shows what was clicked, not only what
+ * the backend did. Its own throttle budget, separate from errors', so a
+ * click storm can't crowd out an error line or the reverse; never throws.
+ */
+export function logAction(action: string, fields: Record<string, string | number | boolean | null | undefined> = {}) {
+  const now = Date.now();
+  if (now - actionWindow.start > LOG_WINDOW_MS) actionWindow = { start: now, count: 0 };
+  if (++actionWindow.count > ACTION_LIMIT) return;
+  const parts = Object.entries(fields)
+    .filter(([, v]) => v !== undefined && v !== null && v !== "")
+    .map(([k, v]) => `${k}=${String(v).includes(" ") ? JSON.stringify(String(v)) : String(v)}`);
+  dispatch({ command: "log_frontend", level: "info", message: ["action=" + action, ...parts].join(" ") }).catch(
+    () => {},
+  );
+}
+
+/** Whether `err` means Modrinth didn't answer (timed out or unreachable), as opposed to refusing the request. */
+export function isServiceUnavailable(err: unknown): boolean {
+  return /Modrinth didn't respond|couldn't reach Modrinth/i.test(errorMessage(err));
+}
+
+/** Whether `err` is the backend refusing a request that's already queued or running. */
+export function isAlreadyQueued(err: unknown): boolean {
+  return errorMessage(err).startsWith("already in progress");
+}
+
 /** Describe a thrown value for the log, with its stack when there is one. */
 export function describeError(err: unknown): string {
   if (err instanceof Error) return err.stack ?? `${err.name}: ${err.message}`;

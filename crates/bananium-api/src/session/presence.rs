@@ -347,14 +347,20 @@ impl Presence {
                 task.files_done = files_done;
                 task.files_total = files_total;
             }
-            Event::TaskCompleted { task_id } | Event::TaskFailed { task_id, .. } => {
+            Event::TaskCompleted { task_id }
+            | Event::TaskFailed { task_id, .. }
+            | Event::TaskCancelled { task_id } => {
                 model.tasks.retain(|t| t.id != task_id);
                 model.task_titles.remove(&task_id);
                 model.instance_count = instance_count(store);
             }
-            Event::Log { .. } | Event::Progress { .. } | Event::PresenceStatusChanged { .. } => {
-                return false
-            }
+            Event::Log { .. }
+            | Event::Progress { .. }
+            | Event::PresenceStatusChanged { .. }
+            | Event::TaskQueued { .. }
+            | Event::TaskStarted { .. }
+            | Event::TaskRetrying { .. }
+            | Event::ServiceRetrying { .. } => return false,
         }
         true
     }

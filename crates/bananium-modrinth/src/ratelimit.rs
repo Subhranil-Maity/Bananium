@@ -52,30 +52,18 @@ impl RateLimiter {
         }
     }
 
-    /// Block until it's safe to send another request. A no-op unless the
-    /// last response reported zero remaining and its reset window hasn't
-    /// elapsed yet, in which case this sleeps for exactly what's left of
-    /// it.
-    pub(crate) async fn wait_if_exhausted(&self) {
-        let wait_for = {
-            let guard = self.state.lock().unwrap();
-            guard.as_ref().and_then(|state| {
-                if state.remaining == 0 {
-                    Some(state.reset_at.saturating_duration_since(Instant::now()))
-                } else {
-                    None
-                }
-            })
-        };
-        if let Some(wait_for) = wait_for {
-            if !wait_for.is_zero() {
-                tracing::debug!(
-                    ?wait_for,
-                    "modrinth rate limit exhausted, waiting for reset"
-                );
-                tokio::time::sleep(wait_for).await;
-            }
-        }
+    /// How long to wait before it's safe to send another request: `None`
+    /// unless the last response reported zero remaining and its reset
+    /// window hasn't elapsed yet, in which case exactly what's left of it.
+    /// The caller sleeps (and reports the wait), since only it knows which
+    /// request is being held back.
+    pub(crate) fn pending_wait(&self) -> Option<Duration> {
+        let guard = self.state.lock().unwrap();
+        guard
+            .as_ref()
+            .filter(|state| state.remaining == 0)
+            .map(|state| state.reset_at.saturating_duration_since(Instant::now()))
+            .filter(|wait| !wait.is_zero())
     }
 }
 

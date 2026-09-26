@@ -242,6 +242,16 @@ pub enum HashAlgorithm {
     Sha512,
 }
 
+impl HashAlgorithm {
+    /// The name Modrinth uses for it, as in `?algorithm=sha1`.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            HashAlgorithm::Sha1 => "sha1",
+            HashAlgorithm::Sha512 => "sha512",
+        }
+    }
+}
+
 /// `POST /version_files` response: a map from each requested hash to the
 /// [`Version`] it identifies. Hashes with no match are simply absent from
 /// the map rather than mapped to `null`.
