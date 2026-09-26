@@ -40,6 +40,11 @@ const USER_AGENT: &str = concat!(
     " (github.com/Subhranil-Maity/Bananium)"
 );
 
+/// Win32 `CREATE_NO_WINDOW` process-creation flag: start a console program
+/// without allocating a console window for it.
+#[cfg(windows)]
+const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
 /// The frontend facade. Every frontend — TUI, CLI, RPC, anything else —
 /// talks to exactly this: `dispatch(Command) -> Result<CommandOutput>`, and
 /// `events()` for a live `Event` stream while that command runs.
@@ -694,6 +699,12 @@ impl Session {
         cmd.stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::from(stdout_log))
             .stderr(std::process::Stdio::from(stderr_log));
+        // `java.exe` is a console program: spawned from a GUI-subsystem
+        // parent (the release desktop build has no console), Windows would
+        // pop up a fresh, empty console window for it. All stdio is already
+        // redirected above, so suppress that window outright.
+        #[cfg(windows)]
+        cmd.creation_flags(CREATE_NO_WINDOW);
         let mut child = cmd.spawn().inspect_err(|err| {
             tracing::error!(instance = %slug, "failed to start the game: {err}");
         })?;

@@ -163,10 +163,17 @@ fn resolve_from_path(exe_name: &str) -> Option<PathBuf> {
 /// the candidate. Doubles as the existence check — a `path` that isn't a
 /// real, runnable `java` binary simply yields `None` here.
 fn probe(path: &Path) -> Option<JavaCandidate> {
-    let output = std::process::Command::new(path)
-        .arg("-version")
-        .output()
-        .ok()?;
+    let mut cmd = std::process::Command::new(path);
+    cmd.arg("-version");
+    // Without this, a GUI-subsystem parent (the release desktop build)
+    // flashes a console window for every probed `java.exe`.
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+    let output = cmd.output().ok()?;
     // `java -version` writes its banner to stderr, e.g. `openjdk version "21.0.7" 2025-04-15`.
     let text = String::from_utf8_lossy(&output.stderr);
     let major_version = parse_major_version(&text)?;
