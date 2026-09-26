@@ -14,7 +14,7 @@ use bananium_core::Paths;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-pub use content::{ContentEntry, ContentKind, ContentStore};
+pub use content::{ContentEntry, ContentKind, ContentStore, ModrinthStatus};
 pub use error::{Error, Result};
 pub use presets::{Preset, PresetEntry, PresetStore};
 

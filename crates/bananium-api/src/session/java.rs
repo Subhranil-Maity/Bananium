@@ -16,9 +16,11 @@ use bananium_meta::{MetaClient, VersionProfile};
 use bananium_net::DownloadSpec;
 use bananium_store::BlobStore;
 
+use super::tasks::TaskSpec;
 use super::Session;
 use crate::error::{Error, Result};
 use crate::output::{CommandOutput, JavaInstall};
+use crate::task::TaskKind;
 
 /// The runtime component `profile` asks for, and its Java major version.
 pub(super) fn required_runtime(profile: &VersionProfile) -> (String, Option<u32>) {
@@ -215,9 +217,16 @@ impl Session {
             if dry_run {
                 return Ok(runtime::java_executable(&dir));
             }
-            let task_id = self.new_task_id("java");
+            // No instance: several launches may share one runtime, and the
+            // download itself is safe to overlap (one writer per file).
+            let spec = TaskSpec::new(
+                TaskKind::JavaRuntime,
+                format!("Downloading Java ({component})"),
+            );
+            let ticket = self.enqueue_task("java", spec, || Ok(()))?;
+            let task_id = ticket.task_id().to_string();
             let provisioned = self
-                .tracked(&task_id, self.ensure_runtime(&task_id, &component))
+                .tracked(ticket, self.ensure_runtime(&task_id, &component))
                 .await?;
             if let Some(path) = provisioned {
                 return Ok(path);

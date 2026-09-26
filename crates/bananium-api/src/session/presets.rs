@@ -4,10 +4,14 @@ use std::path::Path;
 
 use bananium_instance::{ContentKind, Loader, Preset, PresetStore};
 
+use bananium_instance::ContentEntry;
+
 use super::content::Pin;
+use super::tasks::TaskSpec;
 use super::Session;
 use crate::error::{Error, Result};
 use crate::output::{CommandOutput, SkippedEntry};
+use crate::task::TaskKind;
 
 impl Session {
     fn presets(&self) -> PresetStore {
@@ -44,11 +48,39 @@ impl Session {
         })
     }
 
-    /// `Command::PresetApply` as one task. Unlike a plain install, one
-    /// project without a usable version doesn't fail the whole preset: it's
-    /// reported in `skipped` and everything else still installs.
+    /// `Command::PresetApply` as one queued task — version picking
+    /// included, since that's a Modrinth request per project and can take
+    /// a while on its own.
     pub(super) async fn preset_apply(&self, name: &str, instance: &str) -> Result<CommandOutput> {
         let preset = self.presets().get(name)?;
+        let label = format!("Applying {name} to {}", self.instance_name(instance));
+        let spec = TaskSpec::new(TaskKind::PresetApply, label.clone())
+            .instance(instance)
+            .project(name);
+        let ticket = self.enqueue_task("preset", spec, || Ok(()))?;
+        let task_id = ticket.task_id().to_string();
+        self.presence.describe_task(&task_id, label, None);
+        let (applied, skipped) = self
+            .tracked(ticket, self.preset_apply_inner(&task_id, preset, instance))
+            .await?;
+        Ok(CommandOutput::PresetApplied {
+            instance: instance.to_string(),
+            applied,
+            skipped,
+        })
+    }
+
+    /// Pick a version of every preset entry for `instance` and install
+    /// them. Unlike a plain install, one project without a usable version
+    /// doesn't fail the whole preset: it's reported in `skipped` and
+    /// everything else still installs.
+    async fn preset_apply_inner(
+        &self,
+        task_id: &str,
+        preset: Preset,
+        instance: &str,
+    ) -> Result<(Vec<ContentEntry>, Vec<SkippedEntry>)> {
+        self.phase_progress(task_id, "Choosing versions", 0, 1, &mut None);
         let target = self.target(instance)?;
         let installed = self.content().installed_projects(instance)?;
 
@@ -83,22 +115,9 @@ impl Session {
         let applied = if roots.is_empty() {
             Vec::new()
         } else {
-            let task_id = self.new_task_id("preset");
-            if let Ok(cfg) = self.instances().load(instance) {
-                self.presence.describe_task(
-                    &task_id,
-                    format!("Applying {name} to {}", cfg.name),
-                    None,
-                );
-            }
-            self.tracked(&task_id, self.content_install(&task_id, instance, roots))
-                .await?
+            self.content_install(task_id, instance, roots).await?
         };
-        Ok(CommandOutput::PresetApplied {
-            instance: instance.to_string(),
-            applied,
-            skipped,
-        })
+        Ok((applied, skipped))
     }
 
     /// `Command::PresetDelete`.

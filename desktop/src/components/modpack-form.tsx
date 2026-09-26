@@ -19,9 +19,10 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { VALID_INSTANCE_NAME } from "@/components/instance-actions";
 import { Field, GroupPicker, uniqueInstanceName } from "@/components/instance-form-parts";
 import { INSTANCES_KEY, useInstances } from "@/hooks/use-instances";
-import { errorMessage, run } from "@/lib/api";
+import { errorMessage, isAlreadyQueued, logAction, run } from "@/lib/api";
 import { allGroups } from "@/lib/instances";
 import { cn } from "@/lib/utils";
+import { isActive, retryKey, useTasks } from "@/stores/tasks";
 
 /** What the create dialog was opened for in modpack mode. */
 export type ModpackTarget =
@@ -52,11 +53,25 @@ function InfoRow({ label, children }: { label: string; children: React.ReactNode
 export function ModpackForm({ modpack, onDone }: { modpack: ModpackTarget; onDone: () => void }) {
   const queryClient = useQueryClient();
   const { data: instances } = useInstances();
-  const taken = new Set((instances ?? []).map((i) => i.name.toLowerCase()));
+  const registerRetry = useTasks((s) => s.registerRetry);
+  // Names of instances still being created count as taken too: the backend
+  // refuses a second install under a pending name.
+  const pendingNames = useTasks((s) =>
+    Object.values(s.tasks)
+      .filter((t) => isActive(t) && (t.kind === "modpack_install" || t.kind === "install") && t.instance)
+      .map((t) => t.instance!.toLowerCase())
+      .join("\n"),
+  );
+  const taken = new Set([
+    ...(instances ?? []).map((i) => i.name.toLowerCase()),
+    ...pendingNames.split("\n").filter(Boolean),
+  ]);
   const groups = allGroups(instances);
 
   const versions = useQuery({
-    queryKey: ["modpack-versions", modpack.source === "modrinth" ? modpack.projectId : null],
+    // Same key and command as the project sheet's version list, so opening
+    // this from the sheet reuses what it already loaded.
+    queryKey: ["modrinth-versions", modpack.source === "modrinth" ? modpack.projectId : null, null],
     queryFn: async () =>
       (
         await run(
@@ -108,25 +123,51 @@ export function ModpackForm({ modpack, onDone }: { modpack: ModpackTarget; onDon
       : (inspected.data?.unsupported ?? null);
 
   const install = useMutation({
+    mutationKey: ["modpack-install"],
     mutationFn: (args: { source: ModpackSource; name: string; group: string }) =>
       run(
         { command: "modpack_install", source: args.source, name: args.name, group: args.group || null },
         "installed",
       ),
+    onMutate: (args) => {
+      const project = args.source.type === "modrinth" ? args.source.project : null;
+      registerRetry(retryKey("modpack_install", args.name, project), () => install.mutate(args));
+    },
     onSuccess: (out, args) => {
       toast.success(`${args.name} is ready`, { description: `Minecraft ${out.mc_version}` });
       void queryClient.invalidateQueries({ queryKey: INSTANCES_KEY });
     },
-    onError: (err, args) => toast.error(`Couldn't install ${args.name}`, { description: errorMessage(err) }),
+    onError: (err, args) => {
+      if (isAlreadyQueued(err)) {
+        toast.info(`${args.name} is already being installed`, { description: "It's in the task tray." });
+        return;
+      }
+      toast.error(`Couldn't install ${args.name}`, {
+        description: errorMessage(err),
+        closeButton: true,
+        duration: 15_000,
+        action: { label: "Retry", onClick: () => install.mutate(args) },
+      });
+    },
   });
 
   function submit() {
+    // The dialog closes right away, so a second click can only come from
+    // re-opening it; the name check and the backend both catch that.
+    if (install.isPending) return;
     const source: ModpackSource =
       modpack.source === "modrinth"
         ? { type: "modrinth", project: modpack.projectId, version: version!.id }
         : { type: "file", path: modpack.path };
+    logAction("modpack_dialog_submitted", {
+      name: finalName,
+      project: modpack.source === "modrinth" ? modpack.projectId : null,
+      version: modpack.source === "modrinth" ? version?.id : null,
+      file: modpack.source === "file" ? modpack.path.split(/[\\/]/).pop() : null,
+    });
     install.mutate({ source, name: finalName, group: group.trim() });
-    // Progress shows in the task tray; no need to hold the dialog open.
+    // The task shows in the tray the moment it's queued; no need to hold
+    // the dialog open.
     onDone();
   }
 
@@ -228,10 +269,19 @@ export function ModpackForm({ modpack, onDone }: { modpack: ModpackTarget; onDon
       </div>
 
       <DialogFooter>
-        <Button variant="ghost" onClick={onDone}>
+        <Button
+          variant="ghost"
+          onClick={() => {
+            logAction("modpack_dialog_cancelled");
+            onDone();
+          }}
+        >
           Cancel
         </Button>
-        <Button disabled={!ready || !!unsupported || !finalName || nameInvalid || nameTaken} onClick={submit}>
+        <Button
+          disabled={!ready || !!unsupported || !finalName || nameInvalid || nameTaken || install.isPending}
+          onClick={submit}
+        >
           {install.isPending && <Loader2 className="animate-spin" />}
           Install
         </Button>

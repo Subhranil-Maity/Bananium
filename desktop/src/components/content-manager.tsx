@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import {
+  AlertTriangle,
   ArrowUpCircle,
   ExternalLink,
   FileUp,
@@ -42,9 +43,10 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { EmptyState } from "@/components/page";
 import { INSTANCES_KEY } from "@/hooks/use-instances";
 import { useContent } from "@/hooks/use-content";
-import { errorMessage, run } from "@/lib/api";
+import { errorMessage, isAlreadyQueued, logAction, run } from "@/lib/api";
 import { KINDS, contentKey, kindExtension } from "@/lib/content";
 import { cn } from "@/lib/utils";
+import { retryKey, useActiveTask, useTasks } from "@/stores/tasks";
 
 function folderOf(kind: ContentKind) {
   return kind === "mod" ? "mods" : kind === "shader" ? "shaderpacks" : "resourcepacks";
@@ -125,9 +127,14 @@ function EntryRow({
                 dep
               </Tag>
             )}
-            {!entry.project_id && (
-              <Tag className="bg-muted text-muted-foreground" title="Not identified on Modrinth">
-                local
+            {entry.modrinth === "not_found" && (
+              <Tag className="bg-muted text-muted-foreground" title="Checked: Modrinth doesn't know this file">
+                not on Modrinth
+              </Tag>
+            )}
+            {entry.modrinth === "unchecked" && (
+              <Tag className="bg-warning/15 text-warning" title="Not identified yet; use Identify to look it up on Modrinth">
+                unidentified
               </Tag>
             )}
             {!entry.enabled && <Tag className="bg-muted text-muted-foreground">disabled</Tag>}
@@ -250,14 +257,46 @@ export function ContentManager({ instance }: { instance: InstanceSummary }) {
     onError: (err) => toast.error("Update failed", { description: errorMessage(err) }),
   });
 
+  const registerRetry = useTasks((s) => s.registerRetry);
+  const identifyTask = useActiveTask("content_identify", slug);
   const identify = useMutation({
-    mutationFn: async () => (await run({ command: "content_identify", instance: slug }, "content_identified")).identified,
-    onSuccess: (n) => {
-      toast.info(n ? `Identified ${n} file${n === 1 ? "" : "s"} on Modrinth` : "No new matches on Modrinth");
+    mutationKey: ["content-identify", slug],
+    mutationFn: async () => await run({ command: "content_identify", instance: slug }, "content_identified"),
+    onMutate: () => registerRetry(retryKey("content_identify", slug, null), () => identify.mutate()),
+    onSuccess: ({ identified, not_found }) => {
+      const found = identified
+        ? `Identified ${identified} file${identified === 1 ? "" : "s"}`
+        : "No new matches on Modrinth";
+      toast.info(found, {
+        description: not_found
+          ? `${not_found} file${not_found === 1 ? " isn't" : "s aren't"} on Modrinth; the console lists which.`
+          : undefined,
+      });
       refresh();
     },
-    onError: (err) => toast.error("Couldn't identify files", { description: errorMessage(err) }),
+    onError: (err) => {
+      if (isAlreadyQueued(err)) {
+        toast.info("Already identifying", { description: "It's in the task tray." });
+        return;
+      }
+      toast.error("Couldn't identify files", {
+        description: errorMessage(err),
+        closeButton: true,
+        duration: 15_000,
+        action: { label: "Retry", onClick: () => identify.mutate() },
+      });
+    },
   });
+  const identifying = identify.isPending || !!identifyTask;
+  const unidentified = (entries ?? []).filter((e) => e.modrinth === "unchecked").length;
+  function startIdentify(from: string) {
+    if (identifying) {
+      logAction("identify_ignored", { instance: slug, reason: "already in progress" });
+      return;
+    }
+    logAction("identify_clicked", { instance: slug, unidentified, from });
+    identify.mutate();
+  }
 
   /** Bulk actions run the per-item commands one after another. */
   const bulk = useMutation({
@@ -356,14 +395,33 @@ export function ContentManager({ instance }: { instance: InstanceSummary }) {
             <Button
               variant="outline"
               size="icon"
-              aria-label="Identify local files"
-              disabled={identify.isPending}
-              onClick={() => identify.mutate()}
+              aria-label="Identify mods on Modrinth"
+              disabled={identifying}
+              onClick={() => startIdentify("toolbar")}
+              className={cn(
+                "relative",
+                unidentified > 0 &&
+                  !identifying &&
+                  "border-primary text-primary shadow-[0_0_12px_-2px] shadow-primary/70 ring-2 ring-primary/40 hover:text-primary",
+              )}
             >
-              {identify.isPending ? <Loader2 className="animate-spin" /> : <ScanSearch />}
+              {identifying ? <Loader2 className="animate-spin" /> : <ScanSearch />}
+              {unidentified > 0 && !identifying && (
+                <span className="absolute -top-1.5 -right-1.5 min-w-4 rounded-full bg-primary px-1 text-[10px] leading-4 font-semibold text-primary-foreground tabular-nums">
+                  {unidentified}
+                </span>
+              )}
             </Button>
           </TooltipTrigger>
-          <TooltipContent>Identify local files on Modrinth</TooltipContent>
+          <TooltipContent>
+            {identifying
+              ? identifyTask?.status === "queued"
+                ? "Identify is queued"
+                : "Identifying…"
+              : unidentified > 0
+                ? `Identify ${unidentified} unidentified file${unidentified === 1 ? "" : "s"} on Modrinth`
+                : "Everything is identified"}
+          </TooltipContent>
         </Tooltip>
         <Button variant="outline" disabled={blocked || importFiles.isPending} onClick={() => void pickFiles()}>
           {importFiles.isPending ? <Loader2 className="animate-spin" /> : <FileUp />}
@@ -391,6 +449,21 @@ export function ContentManager({ instance }: { instance: InstanceSummary }) {
       </div>
 
       {error && <p className="text-sm text-destructive">{errorMessage(error)}</p>}
+      {unidentified > 0 && (
+        <div className="flex items-center gap-2.5 rounded-md border border-primary/40 bg-primary/10 px-3 py-2 text-[13px]">
+          <AlertTriangle className="size-4 shrink-0 text-primary" />
+          <span className="flex-1">
+            <span className="font-medium">
+              {unidentified} file{unidentified === 1 ? " is" : "s are"} unidentified.
+            </span>{" "}
+            <span className="text-muted-foreground">Identify them to get icons, names and update checks.</span>
+          </span>
+          <Button size="sm" disabled={identifying} onClick={() => startIdentify("banner")}>
+            {identifying ? <Loader2 className="animate-spin" /> : <ScanSearch />}
+            {identifying ? (identifyTask?.status === "queued" ? "Queued" : "Identifying…") : "Identify"}
+          </Button>
+        </div>
+      )}
       {blocked ? (
         <EmptyState>
           {instance.name} is a vanilla instance. {kind === "mod" ? "Mods" : "Shaders"} need Fabric — create a Fabric

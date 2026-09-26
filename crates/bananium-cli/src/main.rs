@@ -146,6 +146,9 @@ enum ContentAction {
     },
     /// Show available updates.
     Updates { instance: String },
+    /// Look unidentified files up on Modrinth (files Modrinth doesn't know
+    /// are marked and logged, and not checked again).
+    Identify { instance: String },
 }
 
 fn parse_kind(s: &str) -> Result<ContentKind, String> {
@@ -346,6 +349,7 @@ async fn run_cli(command: Cmd, format_json: bool) -> std::process::ExitCode {
                 filename,
             },
             ContentAction::Updates { instance } => Command::ContentCheckUpdates { instance },
+            ContentAction::Identify { instance } => Command::ContentIdentify { instance },
         },
         Cmd::Preset { action } => match action {
             PresetAction::Ls => Command::PresetList,
@@ -523,6 +527,31 @@ impl ProgressPrinter {
             // `launch` prints the pid from its result; the CLI never starts
             // Discord Rich Presence.
             Event::InstanceLaunched { .. } | Event::PresenceStatusChanged { .. } => {}
+            Event::TaskQueued {
+                label, position, ..
+            } if position > 1 => {
+                eprintln!("{label}: queued ({} ahead)", position - 1);
+            }
+            Event::TaskRetrying {
+                attempt,
+                max_attempts,
+                reason,
+                ..
+            }
+            | Event::ServiceRetrying {
+                attempt,
+                max_attempts,
+                reason,
+                ..
+            } => {
+                if self.rendered_anything {
+                    eprintln!();
+                    self.rendered_anything = false;
+                }
+                eprintln!("{reason} — retrying ({attempt}/{max_attempts})");
+            }
+            Event::TaskCancelled { .. } => eprintln!("cancelled"),
+            Event::TaskQueued { .. } | Event::TaskStarted { .. } => {}
         }
     }
 }
@@ -713,8 +742,12 @@ fn print_output(output: &CommandOutput, as_json: bool) {
             println!("{state} {filename}");
         }
         CommandOutput::ContentImported { entry, .. } => println!("imported {}", entry.title),
-        CommandOutput::ContentIdentified { identified, .. } => {
-            println!("identified {identified} file(s)");
+        CommandOutput::ContentIdentified {
+            identified,
+            not_found,
+            ..
+        } => {
+            println!("identified {identified} file(s); {not_found} not on Modrinth");
         }
         CommandOutput::ContentUpdatesFound { updates, .. } => {
             if updates.is_empty() {
@@ -912,5 +945,8 @@ fn print_output(output: &CommandOutput, as_json: bool) {
         CommandOutput::PresenceStatusShown { .. }
         | CommandOutput::PresencePreviewed { .. }
         | CommandOutput::PresenceViewSet => {}
+        // A CLI process only ever has its own one command in flight, so it
+        // has no queue to list or cancel from.
+        CommandOutput::TaskListed { .. } | CommandOutput::TaskCancelled { .. } => {}
     }
 }

@@ -79,6 +79,20 @@ pub enum Error {
     BadModpack(String),
     #[error("{0}")]
     UnsupportedModpack(String),
+    /// The same request is already queued or running; the payload is that
+    /// task's label. What a double-click produces.
+    #[error("already in progress: {0}")]
+    AlreadyQueued(String),
+    /// A direct change to an instance that a task is working on.
+    #[error("{instance} is busy ({task}); try again when that finishes")]
+    InstanceBusy { instance: String, task: String },
+    /// The task was cancelled while it waited in the queue.
+    #[error("cancelled")]
+    Cancelled,
+    #[error("task {0:?} is already running and can't be cancelled")]
+    TaskRunning(String),
+    #[error("no queued task {0:?}")]
+    TaskNotFound(String),
 }
 
 /// Generates a `From<$source> for Error` that boxes on the way in. Written

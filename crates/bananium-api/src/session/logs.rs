@@ -9,7 +9,7 @@ use std::time::UNIX_EPOCH;
 
 use bananium_core::logging::{self, EndKind};
 
-use super::Session;
+use super::{blocking, Session};
 use crate::error::{Error, Result};
 use crate::output::{CommandOutput, LauncherLogFile, LogFile, LogStatus};
 
@@ -216,13 +216,6 @@ impl Session {
         }
         Ok(CommandOutput::Logged)
     }
-}
-
-/// Run blocking file work off the async runtime.
-async fn blocking<T: Send + 'static>(f: impl FnOnce() -> Result<T> + Send + 'static) -> Result<T> {
-    tokio::task::spawn_blocking(f)
-        .await
-        .map_err(|e| Error::Io(std::io::Error::other(e)))?
 }
 
 fn file_name(path: &Path) -> String {

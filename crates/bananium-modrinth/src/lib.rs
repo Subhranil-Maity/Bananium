@@ -18,7 +18,10 @@ mod facets;
 mod models;
 mod ratelimit;
 
-pub use client::{ModrinthClient, SearchQuery, Sort, UpdateVersionFilesRequest, VersionsFilter};
+pub use client::{
+    ModrinthClient, RetryNotice, RetryObserver, RetryReason, SearchQuery, Sort,
+    UpdateVersionFilesRequest, VersionsFilter, CONNECT_TIMEOUT, REQUEST_TIMEOUT,
+};
 pub use error::{Error, Result};
 pub use facets::{Facet, Facets, FacetsBuilder};
 pub use models::{

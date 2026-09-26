@@ -21,10 +21,12 @@ use bananium_store::BlobStore;
 use serde::Deserialize;
 
 use super::files::join_relative;
-use super::Session;
+use super::tasks::TaskSpec;
+use super::{blocking, Session};
 use crate::command::{ModpackSource, SearchSort};
 use crate::error::{Error, Result};
 use crate::output::{CommandOutput, ModpackSummary, ModrinthVersion};
+use crate::task::TaskKind;
 
 const INDEX_FILE: &str = "modrinth.index.json";
 /// Loaders a pack may list that Bananium can't run.
@@ -245,12 +247,38 @@ impl Session {
         name: Option<&str>,
         group: Option<&str>,
     ) -> Result<CommandOutput> {
-        let task_id = self.new_task_id("modpack");
-        self.tracked(
-            &task_id,
-            self.modpack_install(&task_id, source, name, group),
-        )
-        .await
+        let label = match (source, name) {
+            (_, Some(name)) => format!("Installing modpack {name}"),
+            (ModpackSource::Modrinth { project, .. }, None) => {
+                format!("Installing modpack {project}")
+            }
+            (ModpackSource::File { path }, None) => format!(
+                "Installing modpack {}",
+                path.file_name().unwrap_or_default().to_string_lossy()
+            ),
+        };
+        let mut spec = TaskSpec::new(TaskKind::ModpackInstall, label.clone());
+        if let ModpackSource::Modrinth { project, .. } = source {
+            spec = spec.project(project.clone());
+        }
+        let slug = name.map(InstanceStore::slugify);
+        if let Some(slug) = &slug {
+            spec = spec.instance(slug.clone());
+        }
+        // Checked under the queue's lock, together with "is an install
+        // under this name already pending", so two quick clicks can't both
+        // pass it and then install into one directory.
+        let store = self.instances();
+        let ticket = self.enqueue_task("modpack", spec, || match (&slug, name) {
+            (Some(slug), Some(name)) if store.resolve(Some(slug)).is_ok() => {
+                Err(InstanceError::AlreadyExists(name.to_string()).into())
+            }
+            _ => Ok(()),
+        })?;
+        let task_id = ticket.task_id().to_string();
+        self.presence.describe_task(&task_id, label, None);
+        self.tracked(ticket, self.modpack_install(&task_id, source, name, group))
+            .await
     }
 
     /// Download (for a Modrinth source) and install a modpack as a new
@@ -273,6 +301,7 @@ impl Session {
         let (pack_path, icon_url, project_slug) = match source {
             ModpackSource::File { path } => (path.clone(), None, None),
             ModpackSource::Modrinth { project, version } => {
+                self.phase_progress(task_id, "Fetching pack info", 0, 1, &mut None);
                 self.fetch_modrinth_pack(task_id, project, version.as_deref())
                     .await?
             }
@@ -340,20 +369,36 @@ impl Session {
         }
         self.download_tracked(task_id, &format!("{} files", index.name), specs)
             .await?;
-        let blobs = BlobStore::new(self.paths.clone());
+        // File work in batches off the async runtime, with progress between.
         let mut last = None;
         let total = placements.len();
-        for (i, (sha1, dest)) in placements.iter().enumerate() {
-            self.phase_progress(task_id, "Placing modpack files", i + 1, total, &mut last);
-            blobs.materialize(sha1, dest)?;
+        let mut done = 0;
+        for batch in placements.chunks(64) {
+            let blobs = BlobStore::new(self.paths.clone());
+            let owned = batch.to_vec();
+            blocking(move || {
+                for (sha1, dest) in &owned {
+                    blobs.materialize(sha1, dest)?;
+                }
+                Ok(())
+            })
+            .await?;
+            done += batch.len();
+            self.phase_progress(task_id, "Placing modpack files", done, total, &mut last);
         }
         // The remaining steps each announce themselves, so a frontend never
         // sits on a stale label from an earlier phase while they run.
+        // Identifying the pack's mods on Modrinth is deliberately *not* one
+        // of them: it's slow when Modrinth is, and it's not needed to play,
+        // so the instance page offers it instead.
         let finishing = |step: &str, done: usize| {
-            self.phase_progress(task_id, step, done, 3, &mut None);
+            self.phase_progress(task_id, step, done, 2, &mut None);
         };
         finishing("Applying pack configs", 0);
-        extract_overrides(&pack_path, &game_dir)?;
+        {
+            let (pack_path, game_dir) = (pack_path.clone(), game_dir.clone());
+            blocking(move || extract_overrides(&pack_path, &game_dir)).await?;
+        }
 
         let group = group.filter(|g| !g.trim().is_empty());
         if group.is_some() || project_slug.is_some() || icon_url.is_some() {
@@ -372,13 +417,7 @@ impl Session {
                 tracing::warn!("couldn't set modpack icon: {err}");
             }
         }
-        // Record Modrinth metadata for the pack's mods/packs so they show
-        // up properly and can be updated; offline this just finds nothing.
-        finishing("Identifying mods on Modrinth", 2);
-        if let Err(err) = self.identify(slug).await {
-            tracing::warn!("couldn't identify modpack content: {err}");
-        }
-        finishing("Done", 3);
+        finishing("Done", 2);
         Ok(out)
     }
 

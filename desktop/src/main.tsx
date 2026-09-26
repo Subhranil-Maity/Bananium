@@ -18,8 +18,10 @@ import { AboutPage } from "@/routes/about";
 import { ConsolePage } from "@/routes/console";
 import { RouteError } from "@/components/route-error";
 import { INSTANCES_KEY } from "@/hooks/use-instances";
-import { describeError, logToBackend, onEvent } from "@/lib/api";
+import { describeError, logToBackend, onEvent, run } from "@/lib/api";
+import { contentKey } from "@/lib/content";
 import { PRESENCE_STATUS_KEY } from "@/lib/presence";
+import { useService } from "@/stores/service";
 import { useTasks } from "@/stores/tasks";
 
 const queryClient = new QueryClient({
@@ -49,13 +51,32 @@ void onEvent((event) => {
     queryClient.setQueryData(PRESENCE_STATUS_KEY, event.status);
     return;
   }
+  if (event.event === "service_retrying") {
+    useService
+      .getState()
+      .report({ reason: event.reason, attempt: event.attempt, maxAttempts: event.max_attempts });
+    return;
+  }
   useTasks.getState().apply(event);
+  if (event.event === "task_completed" || event.event === "task_failed") {
+    // Whatever the task touched may have changed, even if the component
+    // that started it is long gone (the modpack dialog closes on submit).
+    const task = useTasks.getState().tasks[event.task_id];
+    void queryClient.invalidateQueries({ queryKey: INSTANCES_KEY });
+    if (task?.instance) void queryClient.invalidateQueries({ queryKey: contentKey(task.instance) });
+  }
   // Installs and launches may have just downloaded a Mojang Java runtime.
   if (event.event === "task_completed") {
     void queryClient.invalidateQueries({ queryKey: ["java-list"] });
     void queryClient.invalidateQueries({ queryKey: ["instance-java"] });
   }
 });
+
+// Rebuild the tray from the backend's queue: after a webview reload, tasks
+// that are still queued or running would otherwise be invisible.
+void run({ command: "task_list" }, "task_listed")
+  .then((out) => useTasks.getState().seed(out.tasks))
+  .catch((err) => logToBackend("warn", `couldn't list tasks: ${describeError(err)}`));
 
 // Hash routing: the production build is served from Tauri's custom
 // protocol, where there's no server to rewrite deep links to index.html.

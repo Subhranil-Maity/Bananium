@@ -7,6 +7,7 @@ use std::time::{Duration, Instant};
 
 use bananium_net::{DownloadSpec, Downloader};
 
+use super::tasks::{TaskSpec, Ticket, CURRENT_TASK};
 use super::Session;
 use crate::error::{Error, Result};
 use crate::event::Event;
@@ -21,35 +22,59 @@ impl Session {
         format!("{kind}-{}", TASK_SEQ.fetch_add(1, Ordering::Relaxed))
     }
 
-    /// Run `f` as task `task_id`: a failure is announced as
-    /// `Event::TaskFailed` (success is announced by `f` itself, via
-    /// [`Session::download_tracked`], because some tasks keep working after
-    /// their downloads finish).
+    /// Queue a new task (announced at once with `Event::TaskQueued`), or
+    /// refuse it as a duplicate of one already pending. `prefix` names the
+    /// task id (`modpack-12`); `precheck` runs atomically with the
+    /// duplicate check — see [`super::tasks::TaskQueue::enqueue`].
+    pub(super) fn enqueue_task(
+        &self,
+        prefix: &str,
+        spec: TaskSpec,
+        precheck: impl FnOnce() -> Result<()>,
+    ) -> Result<Ticket> {
+        self.tasks.enqueue(self.new_task_id(prefix), spec, precheck)
+    }
+
+    /// Run `f` as the task `ticket` queued: wait for its turn, then run it
+    /// with [`CURRENT_TASK`] set (so Modrinth retries are reported against
+    /// it) and announce the outcome as `Event::TaskCompleted` or
+    /// `Event::TaskFailed`. `f` is only polled once the task's turn comes,
+    /// so nothing it does happens while it's still queued.
     pub(super) async fn tracked<T>(
         &self,
-        task_id: &str,
+        ticket: Ticket,
         f: impl std::future::Future<Output = Result<T>>,
     ) -> Result<T> {
-        tracing::info!(task = task_id, "task started");
+        let task_id = ticket.task_id().to_string();
+        ticket.wait_turn().await?;
         let started = Instant::now();
-        let result = f.await;
+        let result = CURRENT_TASK.scope(task_id.clone(), f).await;
         let secs = started.elapsed().as_secs_f32();
         match &result {
             Ok(_) => {
-                tracing::info!(task = task_id, "task finished in {secs:.1}s");
+                tracing::info!(target: "bananium_api::task", task = %task_id, "task finished in {secs:.1}s");
                 self.emit(Event::TaskCompleted {
-                    task_id: task_id.to_string(),
+                    task_id: task_id.clone(),
                 })
             }
             Err(err) => {
-                tracing::error!(task = task_id, "task failed after {secs:.1}s: {err}");
+                tracing::error!(target: "bananium_api::task", task = %task_id, "task failed after {secs:.1}s: {err}");
                 self.emit(Event::TaskFailed {
-                    task_id: task_id.to_string(),
+                    task_id: task_id.clone(),
                     error: err.to_string(),
                 })
             }
         }
+        drop(ticket);
         result
+    }
+
+    /// Log the step `task_id` is on, once per change (never per progress
+    /// tick — see `download_tracked`'s note on flooding).
+    fn log_phase(&self, task_id: &str, phase: &str) {
+        if self.tasks.note_phase(task_id, phase) {
+            tracing::info!(target: "bananium_api::task", task = task_id, "task phase: {phase}");
+        }
     }
 
     /// Download every spec as one task, reporting a single aggregate
@@ -71,6 +96,7 @@ impl Session {
         label: &str,
         specs: Vec<DownloadSpec>,
     ) -> Result<()> {
+        self.log_phase(task_id, label);
         let total = specs.len();
         let overall_total: u64 = specs.iter().filter_map(|s| s.expected_size).sum();
         let bytes_total = (overall_total > 0).then_some(overall_total);
@@ -163,6 +189,7 @@ impl Session {
         total: usize,
         last: &mut Option<Instant>,
     ) {
+        self.log_phase(task_id, label);
         if done != total && last.is_some_and(|t| t.elapsed() < PROGRESS_INTERVAL) {
             return;
         }

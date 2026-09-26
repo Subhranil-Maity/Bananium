@@ -9,6 +9,7 @@ mod presence;
 mod presets;
 mod profiles;
 mod system;
+mod tasks;
 mod versions;
 
 use std::collections::HashMap;
@@ -20,7 +21,7 @@ use bananium_launch::{
     build_launch_plan, extract_natives, resolve_libraries, LaunchContext, ProfileStore,
 };
 use bananium_meta::{merge_fabric, FeatureFlags, MetaClient, Platform, VersionProfile};
-use bananium_modrinth::ModrinthClient;
+use bananium_modrinth::{ModrinthClient, RetryNotice};
 use bananium_net::{DownloadSpec, HttpClient};
 use bananium_store::BlobStore;
 use tokio::sync::{broadcast, oneshot};
@@ -29,7 +30,9 @@ use crate::command::Command;
 use crate::error::{Error, Result};
 use crate::event::Event;
 use crate::output::{CommandOutput, ResolvedPaths};
+use crate::task::TaskKind;
 use presence::Presence;
+use tasks::{TaskQueue, TaskSpec, CURRENT_TASK};
 
 /// Sent on every outgoing request. Mojang doesn't require this, but
 /// Modrinth's API (M4) rate-limits generic/missing agents — setting a
@@ -65,6 +68,9 @@ pub struct Session {
     /// Discord Rich Presence. Inert until a frontend calls
     /// [`Session::start_presence`].
     presence: Arc<Presence>,
+    /// Every long-running command waits its turn here — see
+    /// `session/tasks.rs` for the rules.
+    tasks: Arc<TaskQueue>,
 }
 
 impl Session {
@@ -74,10 +80,11 @@ impl Session {
     pub fn new(paths: Paths, config: Config) -> Result<Self> {
         paths.ensure_dirs()?;
         let http = HttpClient::new(USER_AGENT)?;
-        let modrinth = ModrinthClient::new(USER_AGENT)?;
         // Progress is throttled at the source (see `download_tracked`), so
         // this only needs headroom for bursts, not for per-file floods.
         let (events_tx, _rx) = broadcast::channel(4096);
+        let modrinth = ModrinthClient::new(USER_AGENT)?
+            .with_retry_observer(Arc::new(retry_reporter(events_tx.clone())));
         let presence = Arc::new(Presence::new(config.discord.clone()));
         Ok(Self {
             paths,
@@ -85,6 +92,7 @@ impl Session {
             config: RwLock::new(config),
             http,
             modrinth,
+            tasks: Arc::new(TaskQueue::new(events_tx.clone())),
             events_tx,
             kill_switches: Arc::default(),
         })
@@ -136,6 +144,7 @@ impl Session {
                 | Command::LogList { .. }
                 | Command::PresenceStatus
                 | Command::LogFrontend { .. }
+                | Command::TaskList
         );
         let started = std::time::Instant::now();
         let result = self.dispatch_inner(command).await;
@@ -197,8 +206,12 @@ impl Session {
             Command::InstanceSetIcon { instance, path } => {
                 self.instance_set_icon(&instance, path.as_deref())
             }
-            Command::InstanceRemove { instance } => self.instance_remove(&instance),
+            Command::InstanceRemove { instance } => {
+                self.tasks.ensure_idle(&instance, true)?;
+                self.instance_remove(&instance)
+            }
             Command::InstanceRename { instance, new_name } => {
+                self.tasks.ensure_idle(&instance, true)?;
                 self.instance_rename(&instance, &new_name)
             }
             Command::InstanceClone { instance, new_name } => {
@@ -218,15 +231,30 @@ impl Session {
                 path,
                 text,
                 create_new,
-            } => self.file_write(&instance, &path, &text, create_new),
-            Command::FileCreateDir { instance, path } => self.file_create_dir(&instance, &path),
-            Command::FileRename { instance, from, to } => self.file_rename(&instance, &from, &to),
-            Command::FileDelete { instance, path } => self.file_delete(&instance, &path),
+            } => {
+                self.tasks.ensure_idle(&instance, false)?;
+                self.file_write(&instance, &path, &text, create_new)
+            }
+            Command::FileCreateDir { instance, path } => {
+                self.tasks.ensure_idle(&instance, false)?;
+                self.file_create_dir(&instance, &path)
+            }
+            Command::FileRename { instance, from, to } => {
+                self.tasks.ensure_idle(&instance, false)?;
+                self.file_rename(&instance, &from, &to)
+            }
+            Command::FileDelete { instance, path } => {
+                self.tasks.ensure_idle(&instance, false)?;
+                self.file_delete(&instance, &path)
+            }
             Command::FileImport {
                 instance,
                 path,
                 sources,
-            } => self.file_import(&instance, &path, &sources),
+            } => {
+                self.tasks.ensure_idle(&instance, false)?;
+                self.file_import(&instance, &path, &sources)
+            }
             Command::ModrinthSearch {
                 query,
                 kind,
@@ -283,25 +311,34 @@ impl Session {
                 project,
                 version,
             } => {
-                self.content_install_tracked(&instance, vec![(project, version, kind)])
+                self.content_install_tracked(&instance, project, version, kind)
                     .await
             }
             Command::ContentRemove {
                 instance,
                 kind,
                 filename,
-            } => self.content_remove(&instance, kind, &filename),
+            } => {
+                self.tasks.ensure_idle(&instance, false)?;
+                self.content_remove(&instance, kind, &filename)
+            }
             Command::ContentToggle {
                 instance,
                 kind,
                 filename,
                 enabled,
-            } => self.content_toggle(&instance, kind, &filename, enabled),
+            } => {
+                self.tasks.ensure_idle(&instance, false)?;
+                self.content_toggle(&instance, kind, &filename, enabled)
+            }
             Command::ContentImport {
                 instance,
                 kind,
                 path,
-            } => self.content_import(&instance, kind, &path).await,
+            } => {
+                self.tasks.ensure_idle(&instance, false)?;
+                self.content_import(&instance, kind, &path).await
+            }
             Command::ContentIdentify { instance } => self.content_identify(&instance).await,
             Command::ContentCheckUpdates { instance } => {
                 self.content_check_updates(&instance).await
@@ -351,6 +388,13 @@ impl Session {
             } => self.launcher_log_read(file, offset, before).await,
             Command::LauncherLastSession => self.launcher_last_session().await,
             Command::LogFrontend { level, message } => self.log_frontend(&level, &message),
+            Command::TaskList => Ok(CommandOutput::TaskListed {
+                tasks: self.tasks.list(),
+            }),
+            Command::TaskCancel { task_id } => {
+                self.tasks.cancel(&task_id)?;
+                Ok(CommandOutput::TaskCancelled { task_id })
+            }
         }
     }
 
@@ -402,20 +446,19 @@ impl Session {
         name: Option<&str>,
         fabric_loader: Option<&str>,
     ) -> Result<CommandOutput> {
-        let task_id = self.new_task_id("install");
-        self.presence.describe_task(
-            &task_id,
-            format!(
-                "Installing {}",
-                name.unwrap_or(&format!("Minecraft {version}"))
-            ),
-            None,
+        let label = format!(
+            "Installing {}",
+            name.unwrap_or(&format!("Minecraft {version}"))
         );
-        self.tracked(
-            &task_id,
-            self.install(&task_id, version, name, fabric_loader),
-        )
-        .await
+        let mut spec = TaskSpec::new(TaskKind::Install, label.clone());
+        if let Some(name) = name {
+            spec = spec.instance(InstanceStore::slugify(name));
+        }
+        let ticket = self.enqueue_task("install", spec, || Ok(()))?;
+        let task_id = ticket.task_id().to_string();
+        self.presence.describe_task(&task_id, label, None);
+        self.tracked(ticket, self.install(&task_id, version, name, fabric_loader))
+            .await
     }
 
     /// `Command::Install`: resolve the version (and Fabric loader, if
@@ -519,25 +562,43 @@ impl Session {
         self.download_tracked(task_id, &label, specs).await?;
 
         // Materialize the assets tree into the shape the JVM expects.
-        // Thousands of small files; reported so the task doesn't look stuck
-        // at 100% while this runs.
-        let store = BlobStore::new(self.paths.clone());
+        // Thousands of small files: done in batches off the async runtime
+        // (so other commands and events keep flowing), reported between
+        // batches so the task doesn't look stuck at 100% while this runs.
         let asset_total = asset_index.objects.len();
+        let mut links: Vec<(String, std::path::PathBuf)> = Vec::new();
+        for (name, object) in &asset_index.objects {
+            links.push((
+                object.hash.clone(),
+                self.paths.assets_objects_dir().join(object.object_path()),
+            ));
+            if asset_index.is_virtual {
+                links.push((
+                    object.hash.clone(),
+                    self.paths.assets_virtual_dir(&profile.assets).join(name),
+                ));
+            }
+        }
         let mut last_emit = None;
-        for (i, (name, object)) in asset_index.objects.iter().enumerate() {
+        let mut done = 0;
+        for batch in links.chunks(256) {
+            let store = BlobStore::new(self.paths.clone());
+            let owned = batch.to_vec();
+            blocking(move || {
+                for (hash, dest) in &owned {
+                    store.materialize(hash, dest)?;
+                }
+                Ok(())
+            })
+            .await?;
+            done += batch.len();
             self.phase_progress(
                 task_id,
                 "Preparing game assets",
-                i + 1,
-                asset_total,
+                done,
+                links.len(),
                 &mut last_emit,
             );
-            let object_dest = self.paths.assets_objects_dir().join(object.object_path());
-            store.materialize(&object.hash, &object_dest)?;
-            if asset_index.is_virtual {
-                let virtual_dest = self.paths.assets_virtual_dir(&profile.assets).join(name);
-                store.materialize(&object.hash, &virtual_dest)?;
-            }
         }
         let index_cache_path = self
             .paths
@@ -598,6 +659,10 @@ impl Session {
         // record a pid, so only a real launch needs to check for one first.
         if !dry_run && instances.is_running(&slug)? {
             return Err(Error::InstanceAlreadyRunning(slug));
+        }
+        // Launching mid-install would start a half-built game.
+        if !dry_run {
+            self.tasks.ensure_idle(&slug, false)?;
         }
         tracing::info!(
             instance = %slug,
@@ -771,6 +836,54 @@ impl Session {
             log_path,
         })
     }
+}
+
+/// The Modrinth client's retry observer: report each retry against the task
+/// that made the request (read from [`CURRENT_TASK`]), or as a service-wide
+/// notice when no task did — a search or a project page the UI is loading.
+fn retry_reporter(events: broadcast::Sender<Event>) -> impl Fn(&RetryNotice) + Send + Sync {
+    move |notice: &RetryNotice| {
+        let mut reason = notice.reason.to_string();
+        if notice.wait.as_secs() >= 1 {
+            reason = format!("{reason}; waiting {}s", notice.wait.as_secs());
+        }
+        let event = match CURRENT_TASK.try_with(Clone::clone) {
+            Ok(task_id) => {
+                tracing::warn!(
+                    target: "bananium_api::task",
+                    task = %task_id,
+                    endpoint = %notice.endpoint,
+                    "task retrying: attempt {}/{}: {reason}",
+                    notice.attempt,
+                    notice.max_attempts
+                );
+                Event::TaskRetrying {
+                    task_id,
+                    attempt: notice.attempt,
+                    max_attempts: notice.max_attempts,
+                    reason,
+                }
+            }
+            Err(_) => Event::ServiceRetrying {
+                service: "modrinth".to_string(),
+                attempt: notice.attempt,
+                max_attempts: notice.max_attempts,
+                reason,
+            },
+        };
+        let _ = events.send(event);
+    }
+}
+
+/// Run blocking file work (hashing, zip extraction, thousands of small
+/// file operations) off the async runtime, so it can't stall other commands
+/// and the event stream while it runs.
+pub(super) async fn blocking<T: Send + 'static>(
+    f: impl FnOnce() -> Result<T> + Send + 'static,
+) -> Result<T> {
+    tokio::task::spawn_blocking(f)
+        .await
+        .map_err(|e| Error::Io(std::io::Error::other(e)))?
 }
 
 /// Log how a launched game ended. A non-zero exit (other than one we asked

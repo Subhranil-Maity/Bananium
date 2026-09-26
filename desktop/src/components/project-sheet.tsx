@@ -9,8 +9,10 @@ import { useNewInstance } from "@/components/new-instance-dialog";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { useInstallContent } from "@/hooks/use-content";
-import { errorMessage, run } from "@/lib/api";
+import { RetryingNotice, ServiceError } from "@/components/service-status";
+import { guardedInstall, useInstallContent, useInstallState } from "@/hooks/use-content";
+import { logAction, run } from "@/lib/api";
+import { useActiveTask } from "@/stores/tasks";
 import { formatCount, type BrowseKind } from "@/lib/content";
 import { cn } from "@/lib/utils";
 import { usePresenceView } from "@/lib/presence";
@@ -37,6 +39,8 @@ export function ProjectSheet({
   onOpenChange: (open: boolean) => void;
 }) {
   const install = useInstallContent();
+  const state = useInstallState(instance, projectId);
+  const packTask = useActiveTask("modpack_install", null, kind === "modpack" ? projectId : "");
   const openModpack = useNewInstance((s) => s.openModpack);
   const modpack = kind === "modpack";
   const project = useQuery({
@@ -112,10 +116,16 @@ export function ProjectSheet({
           ) : (
             <>
               <SheetTitle className="sr-only">Loading…</SheetTitle>
-              <Skeleton className="h-20" />
+              {!project.error && <Skeleton className="h-20" />}
             </>
           )}
-          {project.error && <p className="text-sm text-destructive">{errorMessage(project.error)}</p>}
+          <RetryingNotice loading={project.isFetching} />
+          <ServiceError
+            error={project.error}
+            where="project"
+            retrying={project.isFetching}
+            onRetry={() => void project.refetch()}
+          />
           {p && (
             <div className="flex flex-wrap gap-1.5 pt-3">
               {links.map(([label, url]) => (
@@ -127,7 +137,7 @@ export function ProjectSheet({
           )}
         </SheetHeader>
 
-        {p && (
+        {projectId !== null && (
           <Tabs defaultValue="versions" className="gap-3 px-5 py-4">
             <TabsList variant="line" className="h-8 gap-4 p-0">
               <TabsTrigger value="versions" className="flex-none px-0.5 data-[state=active]:after:bg-primary">
@@ -136,7 +146,7 @@ export function ProjectSheet({
               <TabsTrigger value="description" className="flex-none px-0.5 data-[state=active]:after:bg-primary">
                 Description
               </TabsTrigger>
-              {p.gallery.length > 0 && (
+              {p && p.gallery.length > 0 && (
                 <TabsTrigger value="gallery" className="flex-none px-0.5 data-[state=active]:after:bg-primary">
                   Gallery
                 </TabsTrigger>
@@ -149,9 +159,22 @@ export function ProjectSheet({
                   Pick an instance under "Install to" on the Browse page to install a specific version.
                 </p>
               )}
-              {versions.isLoading && <Skeleton className="h-40" />}
-              <div className="overflow-hidden rounded-lg border">
-                {versions.data?.map((v) => (
+              {versions.isLoading && !versions.error && <Skeleton className="h-40" />}
+              <RetryingNotice loading={versions.isFetching} className="mb-2" />
+              <ServiceError
+                error={versions.error}
+                where="versions"
+                retrying={versions.isFetching}
+                onRetry={() => void versions.refetch()}
+                className="mb-2"
+              />
+              <div className={cn("overflow-hidden rounded-lg border", !versions.data && "hidden")}>
+                {versions.data?.map((v) => {
+                  // Only the row being installed spins; the rest just wait.
+                  const thisOne = modpack
+                    ? !!packTask
+                    : state.versions.includes(v.id);
+                  return (
                   <div
                     key={v.id}
                     className={cn(
@@ -177,7 +200,7 @@ export function ProjectSheet({
                     <Button
                       size="sm"
                       variant="outline"
-                      disabled={(!modpack && !instance) || !v.compatible || install.isPending}
+                      disabled={(!modpack && !instance) || !v.compatible || state.pending || !!packTask}
                       title={
                         v.compatible
                           ? modpack
@@ -189,37 +212,48 @@ export function ProjectSheet({
                       }
                       onClick={() => {
                         if (kind === "modpack") {
+                          if (packTask) return;
+                          logAction("modpack_dialog_opened", { project: projectId, version: v.id, from: "sheet" });
                           onOpenChange(false);
                           openModpack({
                             source: "modrinth",
-                            projectId: p.id,
-                            title: p.title,
-                            iconUrl: p.icon_url,
+                            projectId: projectId!,
+                            title: p?.title ?? v.name,
+                            iconUrl: p?.icon_url ?? null,
                             versionId: v.id,
                           });
                         } else {
-                          install.mutate({ instance: instance!, kind, project: p.id, version: v.id });
+                          guardedInstall(
+                            state.pending,
+                            { kind, project: projectId, version: v.id, instance, from: "sheet" },
+                            () => install.mutate({ instance: instance!, kind, project: projectId!, version: v.id }),
+                          );
                         }
                       }}
                     >
-                      {install.isPending ? <Loader2 className="animate-spin" /> : <Download />}
-                      Install
+                      {thisOne ? <Loader2 className="animate-spin" /> : <Download />}
+                      {thisOne ? (state.queued || packTask?.status === "queued" ? "Queued" : "Installing…") : "Install"}
                     </Button>
                   </div>
-                ))}
+                  );
+                })}
               </div>
             </TabsContent>
 
             <TabsContent value="description">
               {/* Modrinth bodies are markdown with some inline HTML; the HTML
                   is intentionally not rendered (react-markdown skips it). */}
-              <article className="prose prose-sm max-w-none select-text dark:prose-invert prose-img:my-1 prose-img:inline-block">
-                <Markdown remarkPlugins={[remarkGfm]}>{p.body}</Markdown>
-              </article>
+              {p ? (
+                <article className="prose prose-sm max-w-none select-text dark:prose-invert prose-img:my-1 prose-img:inline-block">
+                  <Markdown remarkPlugins={[remarkGfm]}>{p.body}</Markdown>
+                </article>
+              ) : (
+                !project.error && <Skeleton className="h-40" />
+              )}
             </TabsContent>
 
             <TabsContent value="gallery" className="grid grid-cols-2 gap-3">
-              {p.gallery.map((g) => (
+              {p?.gallery.map((g) => (
                 <figure key={g.url} className="space-y-1">
                   <img src={g.url} alt={g.title ?? ""} className="rounded-md border" loading="lazy" />
                   {g.title && <figcaption className="text-xs text-muted-foreground">{g.title}</figcaption>}
