@@ -23,6 +23,18 @@ pub struct Config {
     /// Discord Rich Presence settings (`[discord]` in `config.toml`).
     #[serde(default)]
     pub discord: DiscordConfig,
+    /// "Offline Fix": launch with every Mojang auth API host pointed at an
+    /// unresolvable address, so auth is *unavailable* rather than *invalid*
+    /// for Bananium's offline token. That's what lets offline players into
+    /// LAN worlds and keeps multiplayer enabled on versions that check
+    /// account privileges. On unless `config.toml` says
+    /// `offline_fix = false` — see `bananium_launch::OFFLINE_FIX_JVM_ARGS`.
+    #[serde(default = "default_offline_fix")]
+    pub offline_fix: bool,
+}
+
+fn default_offline_fix() -> bool {
+    true
 }
 
 /// What the Discord member list shows next to the user's name.
@@ -104,6 +116,7 @@ impl Default for Config {
             theme: "banana".to_string(),
             java_path: None,
             discord: DiscordConfig::default(),
+            offline_fix: default_offline_fix(),
         }
     }
 }
@@ -116,6 +129,7 @@ struct ConfigFile {
     theme: Option<String>,
     java_path: Option<PathBuf>,
     discord: Option<DiscordConfig>,
+    offline_fix: Option<bool>,
 }
 
 /// The subset of `Config` a frontend may override directly (e.g. via CLI
@@ -150,6 +164,9 @@ impl Config {
             }
             if let Some(v) = file.discord {
                 cfg.discord = v;
+            }
+            if let Some(v) = file.offline_fix {
+                cfg.offline_fix = v;
             }
         }
 
@@ -186,13 +203,15 @@ impl Config {
     /// Persist settings to `config.toml`, touching only the keys given
     /// (`Some`) and preserving everything else in the file, including keys
     /// this version doesn't know about. `java_path: Some(None)` removes the
-    /// key (back to auto-detection). Returns the freshly re-loaded config —
+    /// key (back to auto-detection); `offline_fix: Some(_)` always writes
+    /// the key explicitly, so turning it off sticks. Returns the freshly re-loaded config —
     /// which environment variables can still override, so the caller shows
     /// the value that will actually be used.
     pub fn update_file(
         paths: &Paths,
         max_concurrent_downloads: Option<usize>,
         java_path: Option<Option<PathBuf>>,
+        offline_fix: Option<bool>,
     ) -> Result<Self> {
         let mut table = read_table(paths)?;
         if let Some(n) = max_concurrent_downloads {
@@ -217,6 +236,9 @@ impl Config {
                 table.remove("java_path");
             }
             None => {}
+        }
+        if let Some(on) = offline_fix {
+            table.insert("offline_fix".into(), toml::Value::Boolean(on));
         }
         write_table(paths, &table)?;
         Self::load(paths, ConfigOverrides::default())
@@ -300,7 +322,8 @@ mod tests {
         )
         .unwrap();
 
-        let cfg = Config::update_file(&paths, Some(4), Some(Some("/opt/java".into()))).unwrap();
+        let cfg =
+            Config::update_file(&paths, Some(4), Some(Some("/opt/java".into())), None).unwrap();
         assert_eq!(cfg.max_concurrent_downloads, 4);
         assert_eq!(
             cfg.java_path.as_deref(),
@@ -310,10 +333,10 @@ mod tests {
         let text = std::fs::read_to_string(paths.config_toml()).unwrap();
         assert!(text.contains("future_key"));
 
-        let cfg = Config::update_file(&paths, None, Some(None)).unwrap();
+        let cfg = Config::update_file(&paths, None, Some(None), None).unwrap();
         assert_eq!(cfg.java_path, None);
         assert_eq!(cfg.max_concurrent_downloads, 4);
-        assert!(Config::update_file(&paths, Some(0), None).is_err());
+        assert!(Config::update_file(&paths, Some(0), None, None).is_err());
     }
 
     #[test]
@@ -339,7 +362,28 @@ mod tests {
         assert_eq!(cfg.theme, "midnight");
 
         // Other updates leave [discord] alone.
-        let cfg = Config::update_file(&paths, Some(3), None).unwrap();
+        let cfg = Config::update_file(&paths, Some(3), None, None).unwrap();
         assert_eq!(cfg.discord, wanted);
+    }
+
+    #[test]
+    fn offline_fix_defaults_on_and_turning_it_off_persists() {
+        let dir = tempfile::tempdir().unwrap();
+        let paths = Paths::at(dir.path());
+        std::fs::write(paths.config_toml(), "theme = \"midnight\"\n").unwrap();
+        let cfg = Config::load(&paths, ConfigOverrides::default()).unwrap();
+        assert!(cfg.offline_fix, "a config.toml without the key means on");
+
+        let cfg = Config::update_file(&paths, None, None, Some(false)).unwrap();
+        assert!(!cfg.offline_fix);
+        assert_eq!(cfg.theme, "midnight");
+        let text = std::fs::read_to_string(paths.config_toml()).unwrap();
+        assert!(text.contains("offline_fix = false"));
+
+        // Unrelated updates leave it alone.
+        let cfg = Config::update_file(&paths, Some(2), None, None).unwrap();
+        assert!(!cfg.offline_fix);
+        let cfg = Config::update_file(&paths, None, None, Some(true)).unwrap();
+        assert!(cfg.offline_fix);
     }
 }

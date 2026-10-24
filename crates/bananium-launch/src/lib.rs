@@ -10,4 +10,4 @@ pub use classpath::{resolve_libraries, NativesEntry, ResolvedArtifact, ResolvedL
 pub use error::{Error, Result};
 pub use natives::{extract_natives, natives_cache_key};
 pub use offline::{is_valid_player_name, offline_uuid, LocalProfile, ProfileStore};
-pub use plan::{build_launch_plan, LaunchContext, LaunchPlan};
+pub use plan::{build_launch_plan, LaunchContext, LaunchPlan, OFFLINE_FIX_JVM_ARGS};

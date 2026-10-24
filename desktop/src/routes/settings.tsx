@@ -2,7 +2,6 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { FolderOpen, Loader2, Moon, Sun, Terminal, Trash2 } from "lucide-react";
 import { Link } from "react-router";
-import { openPath } from "@tauri-apps/plugin-opener";
 import { toast } from "sonner";
 
 import type { Config } from "@/bindings/Config";
@@ -10,12 +9,14 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Switch } from "@/components/ui/switch";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { DiscordSettings } from "@/components/discord-settings";
 import { JavaPicker } from "@/components/java-picker";
 import { Page, PageHeader, Section } from "@/components/page";
 import { useJavaList, useRemoveRuntime } from "@/hooks/use-java";
 import { errorMessage, run } from "@/lib/api";
+import { openPathSafe } from "@/lib/open";
 import { formatBytes } from "@/lib/utils";
 import { useTheme, type Theme } from "@/stores/theme";
 import { usePresenceView } from "@/lib/presence";
@@ -46,7 +47,7 @@ function PathRow({ label, value }: { label: string; value: string }) {
         size="icon-sm"
         className="opacity-0 group-hover:opacity-100"
         title="Open"
-        onClick={() => void openPath(value)}
+        onClick={() => openPathSafe(value)}
       >
         <FolderOpen />
       </Button>
@@ -74,6 +75,7 @@ function GameSettings({ config }: { config: Config }) {
           max_concurrent_downloads: Number(downloads),
           // "" clears back to Mojang's runtime per version.
           java_path: java.trim(),
+          offline_fix: null,
         },
         "config_shown",
       ),
@@ -134,7 +136,7 @@ function GameSettings({ config }: { config: Config }) {
                 size="icon-xs"
                 className="opacity-0 group-hover:opacity-100"
                 title="Show in folder"
-                onClick={() => void openPath(j.path.replace(/[\\/]bin[\\/]java(\.exe)?$/, ""))}
+                onClick={() => openPathSafe(j.path.replace(/[\\/]bin[\\/]java(\.exe)?$/, ""))}
               >
                 <FolderOpen />
               </Button>
@@ -166,7 +168,38 @@ function GameSettings({ config }: { config: Config }) {
   );
 }
 
-/** Appearance, Java and downloads, Discord, plus a read-only view of data paths. */
+/** The "Offline Fix" switch; saves on toggle. */
+function MultiplayerSettings({ config }: { config: Config }) {
+  const queryClient = useQueryClient();
+  const save = useMutation({
+    mutationFn: (on: boolean) =>
+      run(
+        { command: "config_set", max_concurrent_downloads: null, java_path: null, offline_fix: on },
+        "config_shown",
+      ),
+    onSuccess: (out) => queryClient.setQueryData(CONFIG_KEY, out),
+    onError: (err) => toast.error("Couldn't save settings", { description: errorMessage(err) }),
+  });
+  const checked = save.isPending ? save.variables : config.offline_fix;
+
+  return (
+    <Section title="Multiplayer">
+      <Row
+        label="Offline Fix"
+        hint="Lets offline players join LAN worlds, and keeps multiplayer enabled on versions that check your account. Applies on next launch."
+      >
+        <Switch
+          className="mt-1.5"
+          checked={checked}
+          disabled={save.isPending}
+          onCheckedChange={(v) => save.mutate(v)}
+        />
+      </Row>
+    </Section>
+  );
+}
+
+/** Appearance, Java and downloads, multiplayer, Discord, plus a read-only view of data paths. */
 export function SettingsPage() {
   usePresenceView({ view: "settings" });
   const { theme, setTheme } = useTheme();
@@ -207,7 +240,11 @@ export function SettingsPage() {
         {error && <p className="text-sm text-destructive">{errorMessage(error)}</p>}
         {data && (
           <>
-            <GameSettings key={JSON.stringify(data.config)} config={data.config} />
+            <GameSettings
+              key={JSON.stringify([data.config.max_concurrent_downloads, data.config.java_path])}
+              config={data.config}
+            />
+            <MultiplayerSettings config={data.config} />
             <DiscordSettings key={`discord-${JSON.stringify(data.config.discord)}`} config={data.config} />
             <Section
               title="Data locations"

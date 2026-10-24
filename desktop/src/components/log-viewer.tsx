@@ -12,7 +12,8 @@ import {
   TextWrap,
   X,
 } from "lucide-react";
-import { openPath, revealItemInDir } from "@tauri-apps/plugin-opener";
+import { revealItemInDir } from "@tauri-apps/plugin-opener";
+import { openPathSafe } from "@/lib/open";
 import { toast } from "sonner";
 
 import type { LogFile } from "@/bindings/LogFile";
@@ -493,7 +494,7 @@ export function LogConsole({
         >
           <Copy />
         </ToolButton>
-        <ToolButton label="Open in editor" disabled={!path} onClick={() => path && void openPath(path)}>
+        <ToolButton label="Open in editor" disabled={!path} onClick={() => path && openPathSafe(path)}>
           <ExternalLink />
         </ToolButton>
         <ToolButton label="Show in folder" disabled={!path} onClick={() => path && void revealItemInDir(path)}>

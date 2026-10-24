@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 import { ArrowLeft, ChevronRight, Clock, FolderOpen, ImagePlus, MoreHorizontal, Package, Timer } from "lucide-react";
-import { openPath } from "@tauri-apps/plugin-opener";
 
 import type { InstanceSummary } from "@/bindings/InstanceSummary";
 import { Button } from "@/components/ui/button";
@@ -17,6 +16,7 @@ import { EmptyState, Page } from "@/components/page";
 import { PlayButton } from "@/components/play-button";
 import { pickIconFile, useInstance, useSetIcon } from "@/hooks/use-instances";
 import { loaderLabel } from "@/lib/instances";
+import { openPathSafe } from "@/lib/open";
 import { formatPlaytime, formatRelative } from "@/lib/utils";
 import { ScreenshotsPage } from "@/routes/screenshots";
 import { usePresenceView } from "@/lib/presence";
@@ -80,7 +80,7 @@ function Header({ instance }: { instance: InstanceSummary }) {
       </div>
 
       <div className="flex items-center gap-1.5">
-        <Button variant="outline" size="icon" title="Open game folder" onClick={() => void openPath(instance.game_dir)}>
+        <Button variant="outline" size="icon" title="Open game folder" onClick={() => openPathSafe(instance.game_dir)}>
           <FolderOpen />
         </Button>
         <DropdownMenu>

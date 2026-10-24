@@ -300,6 +300,20 @@ for real and are worth knowing up front.
   against an independent Python re-implementation, not just self-consistent
   Rust code — see the test in `crates/bananium-launch/src/offline.rs`.
 
+- **Offline Fix** (`bananium_launch::OFFLINE_FIX_JVM_ARGS`, toggled by
+  `Config::offline_fix`, on unless `config.toml` says `offline_fix = false`):
+  every launch points all six `-Dminecraft.api.*.host` properties at
+  `https://nope.invalid`. The bogus hosts are deliberate — don't "clean them
+  up". With the real hosts reachable, Mojang rejects the offline `"0"` token
+  as *invalid*: 26.x LAN hosts then refuse offline joiners ("Invalid
+  session"), and 1.16.4–1.16.5 disables the Multiplayer button. With auth
+  *unavailable* instead, the LAN server lets players in ("Authentication
+  servers are down but will let them in anyway!"). All six are needed
+  because each authlib ignores the overrides unless every property it reads
+  is set, and that set changed across versions (it's only `discovery` from
+  26.3). Manually verified on 1.16.5, 1.20.1, 1.21.11 and 26.3. Pre-1.16
+  versions ignore the flags.
+
 - **Mojang `rules` evaluation** (`bananium_meta::evaluate_rules`): starts at
   `false`; each matching rule overwrites the verdict with its own action;
   empty rules array always applies. This is the actual official-launcher

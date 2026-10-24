@@ -21,9 +21,15 @@ impl Session {
         &self,
         max_concurrent_downloads: Option<usize>,
         java_path: Option<PathBuf>,
+        offline_fix: Option<bool>,
     ) -> Result<CommandOutput> {
         let java_path = java_path.map(|p| (!p.as_os_str().is_empty()).then_some(p));
-        let updated = Config::update_file(&self.paths, max_concurrent_downloads, java_path)?;
+        let updated = Config::update_file(
+            &self.paths,
+            max_concurrent_downloads,
+            java_path,
+            offline_fix,
+        )?;
         *self.config.write().expect("config lock poisoned") = updated;
         self.config_show()
     }
