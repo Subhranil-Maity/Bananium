@@ -15,7 +15,6 @@ import {
   Terminal,
   Trash2,
 } from "lucide-react";
-import { openPath } from "@tauri-apps/plugin-opener";
 import { toast } from "sonner";
 
 import type { InstanceSummary } from "@/bindings/InstanceSummary";
@@ -53,6 +52,7 @@ import {
 } from "@/hooks/use-instances";
 import { errorMessage, run } from "@/lib/api";
 import { allGroups } from "@/lib/instances";
+import { openPathSafe } from "@/lib/open";
 import { cn } from "@/lib/utils";
 import { useInstanceDialogs } from "@/stores/instance-dialogs";
 
@@ -91,7 +91,7 @@ export function useInstanceActions(instance: InstanceSummary, { includeOpen = tr
       ...(includeOpen
         ? [{ id: "open", label: "Open", icon: SquareArrowOutUpRight, onSelect: () => navigate(`/instance/${slug}`) }]
         : []),
-      { id: "folder", label: "Open folder", icon: FolderOpen, onSelect: () => void openPath(instance.game_dir) },
+      { id: "folder", label: "Open folder", icon: FolderOpen, onSelect: () => openPathSafe(instance.game_dir) },
     ],
     [
       {

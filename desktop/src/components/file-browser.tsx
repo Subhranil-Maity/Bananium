@@ -25,7 +25,8 @@ import {
   Trash2,
 } from "lucide-react";
 import { open } from "@tauri-apps/plugin-dialog";
-import { openPath, revealItemInDir } from "@tauri-apps/plugin-opener";
+import { revealItemInDir } from "@tauri-apps/plugin-opener";
+import { openPathSafe } from "@/lib/open";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { toast } from "sonner";
 
@@ -285,7 +286,7 @@ export function FileBrowser({ instance }: { instance: InstanceSummary }) {
   function openEntry(e: FileEntry) {
     if (e.is_dir) go(e.path);
     else if (isText(e)) setEditing(e.path);
-    else void openPath(e.abs_path);
+    else openPathSafe(e.abs_path);
   }
 
   const onError = (title: string) => (err: unknown) => toast.error(title, { description: errorMessage(err) });
@@ -385,7 +386,7 @@ export function FileBrowser({ instance }: { instance: InstanceSummary }) {
       <ContextMenuItem onSelect={() => void refresh()}>
         <RefreshCw /> Refresh
       </ContextMenuItem>
-      <ContextMenuItem onSelect={() => void openPath(dirAbs)}>
+      <ContextMenuItem onSelect={() => openPathSafe(dirAbs)}>
         <FolderOpen /> Open in file explorer
       </ContextMenuItem>
     </ContextMenuContent>
@@ -442,7 +443,7 @@ export function FileBrowser({ instance }: { instance: InstanceSummary }) {
         </Button>
         <Tooltip>
           <TooltipTrigger asChild>
-            <Button variant="outline" size="icon" aria-label="Open in file explorer" onClick={() => void openPath(dirAbs)}>
+            <Button variant="outline" size="icon" aria-label="Open in file explorer" onClick={() => openPathSafe(dirAbs)}>
               <FolderOpen />
             </Button>
           </TooltipTrigger>
@@ -511,7 +512,7 @@ export function FileBrowser({ instance }: { instance: InstanceSummary }) {
                       <ContextMenuShortcut>Enter</ContextMenuShortcut>
                     </ContextMenuItem>
                     {!e.is_dir && isText(e) && (
-                      <ContextMenuItem onSelect={() => void openPath(e.abs_path)}>
+                      <ContextMenuItem onSelect={() => openPathSafe(e.abs_path)}>
                         <ExternalLink /> Open with system editor
                       </ContextMenuItem>
                     )}

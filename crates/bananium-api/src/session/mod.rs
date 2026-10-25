@@ -163,7 +163,8 @@ impl Session {
             Command::ConfigSet {
                 max_concurrent_downloads,
                 java_path,
-            } => self.config_set(max_concurrent_downloads, java_path),
+                offline_fix,
+            } => self.config_set(max_concurrent_downloads, java_path, offline_fix),
             Command::JavaList => self.java_list().await,
             Command::JavaRuntimeRemove { component } => self.java_runtime_remove(&component),
             Command::InstanceJava { instance } => self.instance_java(&instance).await,
@@ -723,6 +724,7 @@ impl Session {
             launcher_version: env!("CARGO_PKG_VERSION").to_string(),
             ram_mb: instance_cfg.ram_mb,
             extra_jvm_args: instance_cfg.jvm_args.clone(),
+            offline_fix: self.config().offline_fix,
         };
 
         tracing::info!(

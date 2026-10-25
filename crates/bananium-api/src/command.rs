@@ -57,6 +57,10 @@ pub enum Command {
         #[serde(default)]
         #[cfg_attr(feature = "ts", ts(type = "string | null"))]
         java_path: Option<PathBuf>,
+        /// The "Offline Fix" launch flags (`Config::offline_fix`).
+        #[serde(default)]
+        #[cfg_attr(feature = "ts", ts(type = "boolean | null"))]
+        offline_fix: Option<bool>,
     },
     /// Every usable JVM: Mojang runtimes Bananium downloaded, then every
     /// JVM detected on this machine.

@@ -11,9 +11,10 @@ pub struct LaunchContext {
     pub player_name: String,
     pub player_uuid: Uuid,
     /// `"0"` for every offline launch — Bananium never talks to an auth server.
+    /// Mojang rejects it as *invalid* whenever the game does ask, which is
+    /// what [`LaunchContext::offline_fix`] exists to sidestep.
     pub access_token: String,
-    /// `"legacy"` for every offline launch, per the offline-UUID convention
-    /// singleplayer/LAN/offline-mode servers all accept.
+    /// `"legacy"` for every offline launch, per the offline-UUID convention.
     pub user_type: String,
     /// Passed as `--gameDir`/`${game_directory}`; this is the actual
     /// `minecraft/` instance directory, not the instance root.
@@ -39,7 +40,34 @@ pub struct LaunchContext {
     /// see [`build_launch_plan`]'s doc comment for why append-only is the
     /// only placement that keeps these interpreted as JVM flags at all.
     pub extra_jvm_args: Vec<String>,
+    /// Add [`OFFLINE_FIX_JVM_ARGS`]. From `Config::offline_fix` (on by
+    /// default).
+    pub offline_fix: bool,
 }
+
+/// The "Offline Fix": point every Mojang API host authlib knows about at an
+/// unresolvable address, so auth calls fail as *unavailable* instead of
+/// Mojang answering *invalid* for the offline `"0"` token. On unavailable
+/// auth, the integrated (LAN) server lets players in with offline profiles
+/// ("Authentication servers are down but will let them in anyway!"), and
+/// 1.16.4–1.16.5 stops disabling the Multiplayer button over a 401 from the
+/// privileges check.
+///
+/// All six are needed: each authlib's `EnvironmentParser` ignores the
+/// overrides unless *every* property it reads is set, and the set changed
+/// over time — `auth/account/session` (1.16–1.16.3), plus `services`
+/// (1.16.4–1.20.1), `account/session/services` (1.20.2),
+/// `session/services` (1.20.3–1.21.8), `session/services/profiles`
+/// (1.21.9–26.2), and only `discovery` (26.3+). Extra ones are ignored, and
+/// pre-1.16 versions ignore all of them.
+pub const OFFLINE_FIX_JVM_ARGS: &[&str] = &[
+    "-Dminecraft.api.discovery.host=https://nope.invalid",
+    "-Dminecraft.api.auth.host=https://nope.invalid",
+    "-Dminecraft.api.account.host=https://nope.invalid",
+    "-Dminecraft.api.session.host=https://nope.invalid",
+    "-Dminecraft.api.services.host=https://nope.invalid",
+    "-Dminecraft.api.profiles.host=https://nope.invalid",
+];
 
 /// A fully-resolved, ready-to-run launch: the exact JVM binary, arguments,
 /// and working directory, with every `${...}` placeholder already
@@ -146,6 +174,10 @@ pub fn build_launch_plan(
         }
     }
 
+    // Before `-Xmx`/extra args so an instance's own flags can override them.
+    if ctx.offline_fix {
+        jvm_args.extend(OFFLINE_FIX_JVM_ARGS.iter().map(|a| a.to_string()));
+    }
     if let Some(ram_mb) = ctx.ram_mb {
         jvm_args.push(format!("-Xmx{ram_mb}M"));
     }
@@ -260,6 +292,7 @@ mod tests {
             launcher_version: "0.1.0".into(),
             ram_mb: None,
             extra_jvm_args: Vec::new(),
+            offline_fix: false,
         }
     }
 
@@ -401,6 +434,71 @@ mod tests {
                 "release",
             ]
         );
+    }
+
+    #[test]
+    fn offline_fix_flags_come_before_ram_and_extra_args_for_both_profile_styles() {
+        let modern: VersionProfile = serde_json::from_str(
+            r#"{
+                "id": "26.3",
+                "type": "release",
+                "mainClass": "net.minecraft.client.main.Main",
+                "assetIndex": {"id":"30","sha1":"a","size":1,"url":"http://x/30.json"},
+                "assets": "30",
+                "downloads": {"client": {"sha1":"b","size":1,"url":"http://x/client.jar"}},
+                "libraries": [],
+                "arguments": {"game": [], "jvm": ["-Djava.library.path=${natives_directory}"]}
+            }"#,
+        )
+        .unwrap();
+        let legacy: VersionProfile = serde_json::from_str(
+            r#"{
+                "id": "1.8.9",
+                "type": "release",
+                "mainClass": "net.minecraft.client.main.Main",
+                "assetIndex": {"id":"1.8","sha1":"a","size":1,"url":"http://x/1.8.json"},
+                "assets": "1.8",
+                "downloads": {"client": {"sha1":"b","size":1,"url":"http://x/client.jar"}},
+                "libraries": [],
+                "minecraftArguments": "--username ${auth_player_name}"
+            }"#,
+        )
+        .unwrap();
+
+        let mut context = ctx();
+        context.offline_fix = true;
+        context.ram_mb = Some(2048);
+        context.extra_jvm_args = vec!["-XX:+UseG1GC".to_string()];
+
+        for profile in [&modern, &legacy] {
+            let plan = build_launch_plan(
+                profile,
+                &platform(),
+                &FeatureFlags::default(),
+                &context,
+                PathBuf::from("java"),
+            );
+            let n = plan.jvm_args.len();
+            assert_eq!(
+                plan.jvm_args[n - 2..],
+                ["-Xmx2048M".to_string(), "-XX:+UseG1GC".to_string()]
+            );
+            let fix = &plan.jvm_args[n - 2 - OFFLINE_FIX_JVM_ARGS.len()..n - 2];
+            assert_eq!(fix, OFFLINE_FIX_JVM_ARGS);
+        }
+
+        context.offline_fix = false;
+        let plan = build_launch_plan(
+            &modern,
+            &platform(),
+            &FeatureFlags::default(),
+            &context,
+            PathBuf::from("java"),
+        );
+        assert!(!plan
+            .jvm_args
+            .iter()
+            .any(|a| a.starts_with("-Dminecraft.api.")));
     }
 
     #[test]

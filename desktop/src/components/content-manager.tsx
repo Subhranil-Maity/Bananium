@@ -19,7 +19,8 @@ import {
   X,
 } from "lucide-react";
 import { open } from "@tauri-apps/plugin-dialog";
-import { openPath, openUrl, revealItemInDir } from "@tauri-apps/plugin-opener";
+import { openUrl, revealItemInDir } from "@tauri-apps/plugin-opener";
+import { openPathSafe } from "@/lib/open";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { toast } from "sonner";
 
@@ -383,7 +384,7 @@ export function ContentManager({ instance }: { instance: InstanceSummary }) {
               variant="outline"
               size="icon"
               aria-label="Open folder"
-              onClick={() => void openPath(`${instance.game_dir}/${folderOf(kind)}`)}
+              onClick={() => openPathSafe(`${instance.game_dir}/${folderOf(kind)}`)}
             >
               <FolderOpen />
             </Button>

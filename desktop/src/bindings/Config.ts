@@ -24,4 +24,13 @@ java_path: string | null,
 /**
  * Discord Rich Presence settings (`[discord]` in `config.toml`).
  */
-discord: DiscordConfig, };
+discord: DiscordConfig, 
+/**
+ * "Offline Fix": launch with every Mojang auth API host pointed at an
+ * unresolvable address, so auth is *unavailable* rather than *invalid*
+ * for Bananium's offline token. That's what lets offline players into
+ * LAN worlds and keeps multiplayer enabled on versions that check
+ * account privileges. On unless `config.toml` says
+ * `offline_fix = false` — see `bananium_launch::OFFLINE_FIX_JVM_ARGS`.
+ */
+offline_fix: boolean, };
