@@ -2,8 +2,14 @@
 title: "Bananium 0.1.2: LAN play with offline accounts"
 description: Friends can now join your LAN worlds with offline accounts, multiplayer works again on 1.16.5, and Open folder buttons do what they say.
 pubDate: 2026-10-25
+updatedDate: 2026-10-25
 tags: [release, multiplayer]
 ---
+
+> **Update:** this is only a partial fix. Joining from the LAN world list
+> works, but joining by typing an address (Direct Connect), for example over
+> Tailscale or another VPN, still fails. More on that
+> [below](#not-fixed-yet-direct-connect-and-vpns).
 
 Bananium 0.1.2 fixes the most common complaint about playing together: open
 your world to LAN, a friend tries to join, and they get kicked with
@@ -36,6 +42,26 @@ message.
   Direct Connect can still fail for offline accounts.
 
 Tested on 1.16.5, 1.20.1, 1.21.11 and 26.3.
+
+## Not fixed yet: Direct Connect and VPNs
+
+If you join by typing your friend's address into **Direct Connect** or a saved
+server, for example a Tailscale address like `100.x.x.x`, it still fails. With
+the fix on you'll see **"cannot reach authentication servers"**, and with it
+off you'll see **"Invalid session"**.
+
+This happens on the joining player's side. Before connecting, your own game
+checks your login with Mojang. It only ignores a failed check for worlds that
+appeared in the LAN list, so for a typed-in address the join stops before
+your friend's game can let you in. Tailscale doesn't carry the broadcasts
+that make a world show up in the LAN list, so over Tailscale, Direct Connect
+is the only option.
+
+A fix is in progress. Until it lands, either:
+
+- use a VPN that carries LAN broadcasts, such as ZeroTier or Radmin VPN, so
+  the world appears in the LAN list, or
+- play on a server with `online-mode=false`.
 
 ## A switch, if you want it
 
